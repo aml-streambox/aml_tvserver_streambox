@@ -6,7 +6,7 @@
  *
  * Description:
  */
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "TvClientWrapper"
 
 #include <vector>
@@ -30,7 +30,7 @@ public:
     ~TvClientWrapper() {
         LOGD("%s.\n", __FUNCTION__);
         if (mpTvClient != NULL) {
-            mpTvClient->Release();
+            delete mpTvClient;
             mpTvClient = NULL;
         }
     }
@@ -84,10 +84,6 @@ public:
         return mpTvClient->SetVdinWorkMode(vdinWorkMode);
     }
 
-    int GetHdmiSPDInfo(tv_source_input_t source, char* data, size_t datalen) {
-        return mpTvClient->GetSPDInfo(source, data, datalen);
-    }
-
     int GetCurrentSourceFrameHeight()
     {
         return mpTvClient->GetCurrentSourceFrameHeight();
@@ -133,16 +129,6 @@ public:
         return mpTvClient->GetSourceConnectStatus(source);
     }
 
-    int SetEdidBoostOn(int bBoostOn)
-    {
-        return mpTvClient->SetEdidBoostOn(bBoostOn);
-    }
-
-    int GetCurrentSourceAllmInfo(tvin_latency_s *info)
-    {
-        return mpTvClient->GetCurrentSourceAllmInfo(info);
-    }
-
     void onTvClientEvent(CTvEvent &event) {
         int eventType = event.getEventType();
         LOGD("%s: eventType: %d.\n", __FUNCTION__, eventType);
@@ -156,7 +142,6 @@ public:
             SignalDetectCallback.TransFmt = (tvin_trans_fmt_t)signalDetectEvent->mTrans_fmt;
             SignalDetectCallback.SignalStatus = (tvin_sig_status_t)signalDetectEvent->mStatus;
             SignalDetectCallback.isDviSignal = signalDetectEvent->mDviFlag;
-            SignalDetectCallback.Hdrinfo = signalDetectEvent->mhdr_info;
             mEventCallbackFunc(TV_EVENT_TYPE_SIGLE_DETECT, &SignalDetectCallback);
             break;
             }
@@ -168,16 +153,6 @@ public:
             SourceConnectCallback.ConnectionState = sourceConnectEvent->connectionState;
 
             mEventCallbackFunc(TV_EVENT_TYPE_SOURCE_CONNECT, &SourceConnectCallback);
-            break;
-            }
-        case CTvEvent::TV_EVENT_SIG_DV_ALLM: {
-            LOGD("%s: allm event.\n", __FUNCTION__);
-            TvEvent::SignalDvAllmEvent *signalDvAllmEvent = (TvEvent::SignalDvAllmEvent *)(&event);
-            SignalDvAllmCallback_t SignalDvAllmCallback;
-            SignalDvAllmCallback.allm_mode = signalDvAllmEvent->allm_mode;
-            SignalDvAllmCallback.it_content = signalDvAllmEvent->it_content;
-            SignalDvAllmCallback.cn_type = (tvin_cn_type_t)signalDvAllmEvent->cn_type;
-            mEventCallbackFunc(TV_EVENT_TYPE_SIG_DV_ALLM, &SignalDvAllmCallback);
             break;
             }
         default:
@@ -194,22 +169,17 @@ public:
 static void HandleTvClientEvent(event_type_t eventType, void *eventData) {
     if (eventType == TV_EVENT_TYPE_SIGLE_DETECT) {
         SignalDetectCallback_t *SignalDetectCallback = (SignalDetectCallback_t *)(eventData);
-        LOGD("%s: source: %d, signalFmt: %d, transFmt: %d, status: %d, isDVI: %d, Hdrinfo: %ud\n", __FUNCTION__,
+        LOGD("%s: source: %d, signalFmt: %d, transFmt: %d, status: %d, isDVI: %d.\n", __FUNCTION__,
                                                    SignalDetectCallback->SourceInput,
                                                    SignalDetectCallback->SignalFmt,
                                                    SignalDetectCallback->TransFmt,
                                                    SignalDetectCallback->SignalStatus,
-                                                   SignalDetectCallback->isDviSignal,
-                                                   SignalDetectCallback->Hdrinfo);
+                                                   SignalDetectCallback->isDviSignal);
     } else if (eventType == TV_EVENT_TYPE_SOURCE_CONNECT) {
         SourceConnectCallback_t *SourceConnectCallback = (SourceConnectCallback_t *)eventData;
         LOGD("%s: source: %d, connectStatus: %d\n", __FUNCTION__,
                   SourceConnectCallback->SourceInput, SourceConnectCallback->ConnectionState);
-    } else if (eventType == TV_EVENT_TYPE_SIG_DV_ALLM) {
-        SignalDvAllmCallback_t *SignalDvAllmCallback = (SignalDvAllmCallback_t *)eventData;
-        LOGD("%s: allm_mode: %d, it_content: %d, cn_type: %d\n", __FUNCTION__,
-                  SignalDvAllmCallback->allm_mode, SignalDvAllmCallback->it_content, SignalDvAllmCallback->cn_type);
-    }else {
+    } else {
         LOGD("%s: invalid event.\n", __FUNCTION__);
     }
     mEventCallback(eventType, eventData);
@@ -263,10 +233,6 @@ int SetEdidData(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t so
 int GetEdidData(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source, char *dataBuf)
 {
     return pTvClientWrapper->tvClientWrapper.GetEdidData(source, dataBuf);
-}
-
-int GetHdmiSPDInfo(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source, char* data, size_t datalen) {
-    return pTvClientWrapper->tvClientWrapper.GetHdmiSPDInfo(source, data, datalen);
 }
 
 int setTvEventCallback(EventCallback Callback)
@@ -328,11 +294,6 @@ tvin_line_scan_mode_t GetCurrentSourceLineScanMode(struct TvClientWrapper_t *pTv
 int GetSourceConnectStatus(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source)
 {
     return pTvClientWrapper->tvClientWrapper.GetSourceConnectStatus(source);
-}
-
-int SetEdidBoostOn(struct TvClientWrapper_t *pTvClientWrapper, int bBoostOn)
-{
-    return pTvClientWrapper->tvClientWrapper.SetEdidBoostOn(bBoostOn);
 }
 
 #ifdef __cplusplus

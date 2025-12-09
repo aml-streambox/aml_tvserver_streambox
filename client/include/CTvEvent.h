@@ -42,8 +42,6 @@ public:
     static const int TV_EVENT_RRT = 23;//RRT
     static const int TV_EVENT_EAS = 24;//EAS
     static const int TV_EVENT_AUDIO_CB = 25;
-    static const int TV_EVENT_SIG_DV_ALLM = 26;
-    static const int TV_EVENT_SIG_CHG_VRR = 27;
 
     CTvEvent(int type) {
         mEventType = type;
@@ -69,7 +67,6 @@ namespace  TvEvent {
             mTrans_fmt = 0;
             mStatus = 0;
             mDviFlag = 0;
-            mhdr_info = 0;
         }
         ~SignalDetectEvent() {}
         int mSourceInput;
@@ -77,31 +74,6 @@ namespace  TvEvent {
         int mTrans_fmt;
         int mStatus;
         int mDviFlag;
-        unsigned int mhdr_info;
-    };
-
-    class SignalDvAllmEvent: public CTvEvent {
-    public:
-        SignalDvAllmEvent() : CTvEvent(CTvEvent::TV_EVENT_SIG_DV_ALLM)
-        {
-            allm_mode = 0;
-            it_content = 0;
-            cn_type = 0;
-        }
-        ~SignalDvAllmEvent() {}
-        int allm_mode;
-        int it_content;
-        int cn_type;
-    };
-
-    class SignalVrrEvent: public CTvEvent {
-    public:
-        SignalVrrEvent() : CTvEvent(CTvEvent::TV_EVENT_SIG_CHG_VRR)
-        {
-            cur_vrr_status = 0;
-        }
-        ~SignalVrrEvent() {}
-        int cur_vrr_status;
     };
 
     class SourceConnectEvent: public CTvEvent {

@@ -6,7 +6,7 @@
  *
  * Description:
  */
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CAmVideo"
 
 #include <stdio.h>
@@ -17,7 +17,6 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include "tvutils.h"
 
 #include "CAmVideo.h"
 #include "CTvLog.h"
@@ -70,11 +69,11 @@ int CAmVideo::AmVideoDeviceIOCtl(int request, ...)
 int CAmVideo::SetVideoLayerStatus(int status)
 {
     int ret = -1;
-    ret = AmVideoDeviceIOCtl(AMSTREAM_IOC_SET_VIDEO_DISABLE, &status);
+    ret = AmVideoDeviceIOCtl(AMSTREAM_IOC_SET_VIDEO_DISABLE_MODE, &status);
     if (ret < 0) {
-        LOGE("%s:[%d] failed.\n", __FUNCTION__, status);
+        LOGE("%s failed.\n", __FUNCTION__);
     } else {
-        LOGD("%s:[%d] success.\n", __FUNCTION__, status);
+        LOGD("%s success.\n", __FUNCTION__);
     }
 
     return ret;
@@ -87,7 +86,7 @@ int CAmVideo::GetVideoLayerStatus(int *status)
         LOGE("%s: param is NULL.\n", __FUNCTION__);
     } else {
         int tempVal = 0;
-        ret = AmVideoDeviceIOCtl(AMSTREAM_IOC_GET_VIDEO_DISABLE, &tempVal);
+        ret = AmVideoDeviceIOCtl(AMSTREAM_IOC_GET_VIDEO_DISABLE_MODE, &tempVal);
         if (ret < 0) {
             LOGE("%s failed.\n", __FUNCTION__);
         } else {
@@ -127,13 +126,5 @@ int CAmVideo::GetVideoGlobalOutputMode(int *mode)
         *mode = tempVal;
     }
     return ret;
-}
-
-int  CAmVideo::GetVideoFrameCount()
-{
-    char buf[32] = {0};
-    tvReadSysfs(PATH_FRAME_COUNT_54, buf);
-    return atoi(buf);
-
 }
 

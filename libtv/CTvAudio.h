@@ -21,7 +21,6 @@ public:
     static CTvAudio *getInstance();
     void create_audio_patch(int device_type);
     void release_audio_patch();
-    void set_audio_av_mute(bool mute);
 private:
     struct audio_port_config source;
     struct audio_port_config sink;

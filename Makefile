@@ -3,16 +3,13 @@
 # aml_tvserver
 #
 ################################################################################
-OUT_DIR ?= .
 LOCAL_PATH = $(shell pwd)
 LDFLAGS += -Wl,--no-as-needed -lstdc++ -lpthread -lz -ldl -lrt -L$(STAGING_DIR)/usr/lib
 CFLAGS += -Wall -Wno-unknown-pragmas -Wno-format -Wno-format-security\
           -O3 -fexceptions -fnon-call-exceptions -D_GNU_SOURCE \
           -I$(STAGING_DIR)/usr/include -DHAVE_AUDIO
 
-LDFLAGS += -lbinder -llog -lubootenv
-
-LDFLAGS += -L $(OUT_DIR)/
+LDFLAGS += -lbinder -llog
 
 ################################################################################
 # libtv.so - src files
@@ -25,7 +22,6 @@ tv_SRCS  = \
 	$(LOCAL_PATH)/libtv/tvutils/tvutils.cpp \
 	$(LOCAL_PATH)/libtv/tvutils/zepoll.cpp \
 	$(LOCAL_PATH)/libtv/tvutils/CTvLog.cpp \
-	$(LOCAL_PATH)/libtv/tvutils/CMsgQueue.cpp \
 	$(LOCAL_PATH)/libtv/CHDMIRxManager.cpp \
 	$(LOCAL_PATH)/libtv/CTv.cpp \
 	$(LOCAL_PATH)/libtv/CTvin.cpp \
@@ -56,50 +52,46 @@ tvservice_SRCS  = \
 	$(NULL)
 
 ################################################################################
-# tvtest - src files
+# hdmiin-demo - src files
 ################################################################################
-tvtest_SRCS  = \
+hdmiin-demo_SRCS  = \
 	$(LOCAL_PATH)/test/main_tvtest.c \
 	$(NULL)
 
 # ---------------------------------------------------------------------
 #  Build rules
-BUILD_TARGETS = libtvclient.so libtv.so tvservice tvtest
-BUILD_TARGETS_FULLPATH := $(patsubst %, $(OUT_DIR)/%, $(BUILD_TARGETS))
+BUILD_TARGETS = libtvclient.so libtv.so tvservice hdmiin-demo
 
 .PHONY: all install clean
 
 libtvclient.so: $(tvclient_SRCS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -shared -fPIC -I$(tvclient_HEADERS) \
-	-o $(OUT_DIR)/$@ $^ $(LDLIBS)
+	-o $@ $^ $(LDLIBS)
 
 libtv.so: $(tv_SRCS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -shared -fPIC -I$(tvclient_HEADERS) \
-	-I$(LOCAL_PATH)/libtv/tvutils -laudio_client -o $(OUT_DIR)/$@ $^ $(LDLIBS)
+	-I$(LOCAL_PATH)/libtv/tvutils -laudio_client -o $@ $^ $(LDLIBS)
 
 tvservice: $(tvservice_SRCS) libtv.so
 	$(CXX) $(CXXFLAGS) $(CFLAGS) $(LDFLAGS) -I$(tvclient_HEADERS) \
 	-I$(LOCAL_PATH)/libtv -I$(LOCAL_PATH)/libtv/tvutils \
-	-L$(LOCAL_PATH) -ltv -laudio_client -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
+	-L$(LOCAL_PATH) -ltv -laudio_client -o $@ $^ $(LDLIBS)
 
-tvtest: $(tvtest_SRCS) libtvclient.so
+hdmiin-demo: $(hdmiin-demo_SRCS) libtvclient.so
 	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(LOCAL_PATH) \
-	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
+	-ltvclient $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 all: $(BUILD_TARGETS)
 
 clean:
-	rm -f $(OUT_DIR)/*.o $(BUILD_TARGETS_FULLPATH)
-	rm -rf $(STAGING_DIR)/usr/include/tvclient
-	rm -rf $(STAGING_DIR)/usr/lib/libtvclient.so
-	rm -rf $(TARGET_DIR)/usr/include/tvclient
-	rm -rf $(TARGET_DIR)/usr/lib/libtvclient.so
-	rm -rf $(TARGET_DIR)/usr/lib/libtv.so
-	rm -rf $(TARGET_DIR)/usr/bin/tvtest
-	rm -rf $(TARGET_DIR)/usr/bin/tvservice
+	rm -f *.o $(BUILD_TARGETS)
 
 install:
-	install -m 0644 $(OUT_DIR)/libtvclient.so $(TARGET_DIR)/usr/lib
-	install -m 0644 $(OUT_DIR)/libtv.so $(TARGET_DIR)/usr/lib/
-	install -m 0755 $(OUT_DIR)/tvservice $(TARGET_DIR)/usr/bin/
-	install -m 0755 $(OUT_DIR)/tvtest $(TARGET_DIR)/usr/bin/
+	mkdir -p $(TARGET_DIR)/usr/lib/aarch64-linux-gnu
+	mkdir -p $(TARGET_DIR)/usr/bin/
+	mkdir -p $(TARGET_DIR)/usr/include/tvclient
+	install -m 0644 libtvclient.so $(TARGET_DIR)/usr/lib/aarch64-linux-gnu
+	install -m 0644 libtv.so $(TARGET_DIR)/usr/lib/aarch64-linux-gnu
+	install -m 0755 tvservice $(TARGET_DIR)/usr/bin/
+	install -m 0755 hdmiin-demo $(TARGET_DIR)/usr/bin/
+	install -m 0644 client/include/*.h $(TARGET_DIR)/usr/include/tvclient

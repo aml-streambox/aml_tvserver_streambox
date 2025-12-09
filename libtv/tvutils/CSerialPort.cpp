@@ -7,7 +7,7 @@
  * Description: c++ file
  */
 
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CSerialPort"
 
 #include "CSerialPort.h"

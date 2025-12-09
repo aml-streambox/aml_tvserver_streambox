@@ -107,14 +107,11 @@
 #define UBOOTENV_PORT_MAP                       "ubootenv.var.port_map"
 #define CFG_HDMI_EDID_FILE_PATH                 "edid.file.path"
 #define CFG_HDMI_EDID_AUTO_LOAD_EN              "edid.data.auto.load.en"
-#define CFG_HDMI_EDID_DEFAULT_VERSION           "edid.data.default.version"
-
 
 #define CFG_DOLBY_MODULE                        "module.dolby.path"
 
 
 //for tv sysfs
-#define SYS_DOLBYVISION_SUPPORT_INFO            "/sys/class/amdolby_vision/support_info"
 #define SYS_SPDIF_MODE_DEV_PATH                 "/sys/class/audiodsp/digital_raw"
 #define SYS_VECM_DNLP_ADJ_LEVEL                 "/sys/module/am_vecm/parameters/dnlp_adj_level"
 

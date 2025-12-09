@@ -22,8 +22,6 @@ enum tvcmd_e {
     TV_CONTROL_GET_FRAME_RATE     = 8,
     TV_CONTROL_GET_LINE_SCAN_MODE = 9,
     TV_CONTROL_GET_CONNECT_STATUS = 10,
-    TV_CONTROL_SET_BOOST_ON       = 11,
-    TV_CONTROL_GET_ALLM_INFO      = 12,
     TV_CONTROL_VDIN_WORK_MODE_SET = 98,
     TV_CONTROL_CMD_MAX            = 99,
 
@@ -41,12 +39,6 @@ enum tvcmd_e {
     HDMI_GET_COLOR_DEPTH          = 110,
     HDMI_SET_ASPECT_RATIO         = 111,
     HDMI_GET_ASPECT_RATIO         = 112,
-    HDMI_SET_ALLM_ENABLED         = 113,
-    HDMI_GET_ALLM_ENABLED         = 114,
-    HDMI_SET_VRR_ENABLED          = 115,
-    HDMI_GET_VRR_ENABLED          = 116,
-    HDMI_GET_VRR_MODE             = 117,
-    HDMI_SPD_INFO_GET             = 198,
     HDMI_CONTROL_CMD_MAX          = 199,
 };
 

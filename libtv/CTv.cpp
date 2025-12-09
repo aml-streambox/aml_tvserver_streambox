@@ -6,7 +6,7 @@
  *
  * Description:
  */
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CTv"
 
 #include <stdint.h>
@@ -18,23 +18,17 @@
 #include "CTvLog.h"
 #include "CVpp.h"
 #include <sys/ioctl.h>
-#include <chrono>
 
-/*
 static tv_hdmi_edid_version_t Hdmi1CurrentEdidVer = HDMI_EDID_VER_14;
 static tv_hdmi_edid_version_t Hdmi2CurrentEdidVer = HDMI_EDID_VER_14;
 static tv_hdmi_edid_version_t Hdmi3CurrentEdidVer = HDMI_EDID_VER_14;
 static tv_hdmi_edid_version_t Hdmi4CurrentEdidVer = HDMI_EDID_VER_14;
-*/
-#define NEW_FRAME_TIME_OUT_COUNT 10
 
-//PORT_NUM define as 3 in the kernel.
-#define K_PORT_NUM (3)
 
 CTv::CTv()
 {
     mpObserver = NULL;
-    UenvInit();
+
     const char* tvConfigFilePath = getenv(CFG_TV_CONFIG_FILE_PATH_STR);
     if (!tvConfigFilePath) {
         LOGD("%s: read tvconfig file path failed!\n", __FUNCTION__);
@@ -58,14 +52,12 @@ CTv::CTv()
     mpTvin->Tvin_AddVideoPath(TV_PATH_VDIN_AMLVIDEO2_PPMGR_DEINTERLACE_AMVIDEO);
     mpTvin->Tvin_LoadSourceInputToPortMap();
     mpHDMIRxManager = new CHDMIRxManager();
-    // update cec port sequence from hdmi tv config.
-    mpHDMIRxManager->SetHdmiPortCecPhysicAddr();
     tvin_info_t signalInfo;
     signalInfo.trans_fmt = TVIN_TFMT_2D;
     signalInfo.fmt = TVIN_SIG_FMT_NULL;
     signalInfo.status = TVIN_SIG_STATUS_NULL;
     signalInfo.cfmt = TVIN_COLOR_FMT_MAX;
-    signalInfo.signal_type= 0;
+    signalInfo.hdr_info= 0;
     signalInfo.fps = 60;
     signalInfo.is_dvi = 0;
     signalInfo.aspect_ratio = TVIN_ASPECT_NULL;
@@ -75,32 +67,20 @@ CTv::CTv()
     int edidAutoLoadEnable = ConfigGetInt(CFG_SECTION_HDMI, CFG_HDMI_EDID_AUTO_LOAD_EN, 1);
     if (edidAutoLoadEnable == 1) {
         LOGD("%s: EDID data load by tvserver!\n", __FUNCTION__);
-        const char* buf = GetUenv(HDMI_UBOOT_EDID_VERSION);
-        if (buf == NULL) {
-            const char* edidDefaultVersion = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_DEFAULT_VERSION, "1.4");
-            int edidSetValue = 0;
-            if (strcmp(edidDefaultVersion, "2.0") == 0 ) {
-                LOGD("%s: Set EDID default version to 2.0!\n", __FUNCTION__);
-                /*
-                Hdmi1CurrentEdidVer = HDMI_EDID_VER_20;
-                Hdmi2CurrentEdidVer = HDMI_EDID_VER_20;
-                Hdmi3CurrentEdidVer = HDMI_EDID_VER_20;
-                Hdmi4CurrentEdidVer = HDMI_EDID_VER_20;
-                */
-                for (int i = 0;i < 4; i ++)
-                    edidSetValue |=  (1 << (4*i));
-            }
-            SetUenv(HDMI_UBOOT_EDID_VERSION,  std::to_string(edidSetValue).c_str());
+        int dolbyVisionEnableState = 0;
+        char buf[32] = {0};
+        tvReadSysfs(DOLBY_VISION_ENABLE_PATH, buf);
+        if (strcmp("Y", buf) == 0) {
+            dolbyVisionEnableState = true;
+        } else {
+            dolbyVisionEnableState = false;
         }
-        bool dolbyVisionEnableState = GetDolbyVisionSupportStatus();
         LoadEdidData(0, dolbyVisionEnableState);
     } else {
         LOGD("%s: EDID data load by customer!\n", __FUNCTION__);
     }
     mTvDevicesPollDetect.setObserver(this);
     mTvDevicesPollDetect.startDetect();
-    mTvMsgQueue = new CTvMsgQueue(this);
-    mTvMsgQueue->startMsgQueue();
     mLastScreenMode = -1;
 }
 
@@ -129,21 +109,31 @@ CTv::~CTv()
 int CTv::StartTv(tv_source_input_t source)
 {
     LOGD("%s: source = %d!\n", __FUNCTION__, source);
-    int ret = 0;
 
-    if (SOURCE_MPEG == source) {
-    LOGD("%s: new source is %d! RETURN\n", __FUNCTION__,source);
-    return ret;
+    if (SOURCE_DTV == source) {//DTV source unsupport ,set blue screen
+        LOGD("%s: DTV: set blue layer!\n", __FUNCTION__);
+        CVpp::getInstance()->VPP_setVideoColor(true);
     }
-    tvWriteSysfs(VIDEO_FREERUN_MODE, "0");
-    CVpp::getInstance()->setVideoaxis();//when open source set video axis full screen
 
+    //DTV need frame AV sync, other source don't need it
+    if (SOURCE_DTV != source) {
+        tvWriteSysfs(VIDEO_SYNC_ENABLE, "0");
+        // set sync mode to vmaster. 0: vmaster; 1:amaster
+        tvWriteSysfs(VIDEO_SYNC_MODE, "0");
+    } else {
+        tvWriteSysfs(VIDEO_FREERUN_MODE, "0");
+    }
+
+    int ret = -1;
     tvin_port_t source_port = mpTvin->Tvin_GetSourcePortBySourceInput(source);
     ret = mpTvin->Tvin_OpenPort(source_port);
     mCurrentSource = source;
+    if (SOURCE_MPEG == source) {
+        LOGD("%s: NEW SOURCE is MPEG! RETURN\n", __FUNCTION__);
+        return ret;
+    }
 #ifdef HAVE_AUDIO
     CTvAudio::getInstance()->create_audio_patch(mapSourcetoAudiotupe(source));
-    CTvAudio::getInstance()->set_audio_av_mute(true);
 #endif
     return ret;
 }
@@ -151,15 +141,8 @@ int CTv::StartTv(tv_source_input_t source)
 int CTv::StopTv(tv_source_input_t source)
 {
     LOGD("%s: source = %d!\n", __FUNCTION__, source);
-    int ret = 0;
-    if (SOURCE_MPEG == source) {
-    LOGD("%s:current source is %d! return\n", __FUNCTION__,source);
-    return ret;
-    }
-
 #ifdef HAVE_AUDIO
     CTvAudio::getInstance()->release_audio_patch();
-    CTvAudio::getInstance()->set_audio_av_mute(false);
 #endif
     mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
     mpAmVideo->SetVideoGlobalOutputMode(VIDEO_GLOBAL_OUTPUT_MODE_DISABLE);
@@ -174,13 +157,13 @@ int CTv::StopTv(tv_source_input_t source)
     tempSignalInfo.fmt = TVIN_SIG_FMT_NULL;
     tempSignalInfo.status = TVIN_SIG_STATUS_NULL;
     tempSignalInfo.cfmt = TVIN_COLOR_FMT_MAX;
-    tempSignalInfo.signal_type= 0;
+    tempSignalInfo.hdr_info= 0;
     tempSignalInfo.fps = 60;
     tempSignalInfo.is_dvi = 0;
     tempSignalInfo.aspect_ratio = TVIN_ASPECT_NULL;
     SetCurrenSourceInfo(tempSignalInfo);
 
-    return ret;
+    return 0;
 }
 
 int CTv::SwitchSource(tv_source_input_t dest_source)
@@ -227,11 +210,11 @@ void CTv::onVdinSignalChange()
             if (ret < 0) {
                 LOGD("%s: Get vidn event error!\n", __FUNCTION__);
             } else {
-                if ((mCurrentSignalInfo.status == TVIN_SIG_STATUS_STABLE) && (mCurrentSignalInfo.signal_type != vdinSignalInfo.signal_type)) {
+                if ((mCurrentSignalInfo.status == TVIN_SIG_STATUS_STABLE) && (mCurrentSignalInfo.hdr_info != vdinSignalInfo.hdr_info)) {
                     if (source_type == SOURCE_TYPE_HDMI) {
-                        //tvSetCurrentHdrInfo(vdinSignalInfo.signal_type);
+                        //tvSetCurrentHdrInfo(vdinSignalInfo.hdr_info);
                     }
-                    mCurrentSignalInfo.signal_type = vdinSignalInfo.signal_type;
+                    mCurrentSignalInfo.hdr_info = vdinSignalInfo.hdr_info;
                 } else {
                     LOGD("%s: hdmi signal don't stable!\n", __FUNCTION__);
                 }
@@ -277,73 +260,16 @@ void CTv::onVdinSignalChange()
         case TVIN_SIG_CHG_DV_ALLM:
             LOGD("%s: allm info change!\n", __FUNCTION__);
             if (source_type == SOURCE_TYPE_HDMI) {
-                onSigDvAllmChange();
+                //setPictureModeBySignal(PQ_MODE_SWITCH_TYPE_AUTO);
             } else {
                 LOGD("%s: not hdmi source!\n", __FUNCTION__);
             }
             break;
-        case TVIN_SIG_CHG_VRR:
-            LOGD("%s: vrr change!\n", __FUNCTION__);
-            if (source_type == SOURCE_TYPE_HDMI) {
-                onSigVrrChange();
-            } else {
-                LOGD("%s: not hdmi source!\n", __FUNCTION__);
-            }
         default:
             LOGD("%s: invalid vdin event!\n", __FUNCTION__);
             break;
         }
     }
-}
-
-void CTv::onSigDvAllmChange(void)
-{
-    tvin_latency_s AllmInfo;
-
-    int ret = mpTvin->Tvin_GetAllmInfo(&AllmInfo);
-	if (ret < 0) {
-        LOGE("%s: mpTvin->Tvin_GetAllmInfo() failed!\n", __FUNCTION__);
-        return;
-    }
-
-    TvEvent::SignalDvAllmEvent event;
-    event.allm_mode = static_cast<int>(AllmInfo.allm_mode);
-    event.it_content = AllmInfo.it_content ? 1 : 0;
-    event.cn_type = AllmInfo.cn_type;
-    sendTvEvent(event);
-}
-
-void CTv::GetAllmInfo(tvin_latency_s *info)
-{
-    int ret = mpTvin->Tvin_GetAllmInfo(info);
-	if (ret < 0) {
-        LOGE("%s: mpTvin->Tvin_GetAllmInfo() failed!\n", __FUNCTION__);
-    }
-}
-
-void CTv::onSigVrrChange(void)
-{
-    vdin_vrr_freesync_param_s vrrparm;
-
-    int ret = mpTvin->VDIN_GetVrrFreesyncParm(&vrrparm);
-    if (ret < 0) {
-        LOGE("%s: mpTvin->VDIN_GetVrrFreesyncParm() failed!\n", __FUNCTION__);
-        return;
-    }
-
-    TvEvent::SignalVrrEvent event;
-    event.cur_vrr_status = vrrparm.cur_vrr_status;
-    sendTvEvent(event);
-}
-
-int CTv::GetVrrMode() {
-    vdin_vrr_freesync_param_s vrrparm;
-    int ret = mpTvin->VDIN_GetVrrFreesyncParm(&vrrparm);
-    if (ret < 0) {
-        LOGE("%s: mpTvin->VDIN_GetVrrFreesyncParm() failed!\n", __FUNCTION__);
-        return 0;
-    }
-    return vrrparm.cur_vrr_status;
 }
 
 void CTv::onSigStatusChange(void)
@@ -357,7 +283,7 @@ void CTv::onSigStatusChange(void)
     } else {
         SetCurrenSourceInfo(tempSignalInfo);
         LOGD("sig_fmt is %d, status is %d, isDVI is %d, hdr_info is 0x%x\n",
-               mCurrentSignalInfo.fmt, mCurrentSignalInfo.status, mCurrentSignalInfo.is_dvi, mCurrentSignalInfo.signal_type);
+               mCurrentSignalInfo.fmt, mCurrentSignalInfo.status, mCurrentSignalInfo.is_dvi, mCurrentSignalInfo.hdr_info);
         if ( mCurrentSignalInfo.status == TVIN_SIG_STATUS_STABLE ) {
             onSigToStable();
         } else if (mCurrentSignalInfo.status == TVIN_SIG_STATUS_UNSTABLE ) {
@@ -380,7 +306,7 @@ int CTv::SetCurrenSourceInfo(tvin_info_t sig_info)
     mCurrentSignalInfo.fmt = sig_info.fmt;
     mCurrentSignalInfo.status = sig_info.status;
     mCurrentSignalInfo.cfmt = sig_info.cfmt;
-    mCurrentSignalInfo.signal_type= sig_info.signal_type;
+    mCurrentSignalInfo.hdr_info= sig_info.hdr_info;
     mCurrentSignalInfo.fps = sig_info.fps;
     mCurrentSignalInfo.is_dvi = sig_info.is_dvi;
     mCurrentSignalInfo.aspect_ratio = sig_info.aspect_ratio;
@@ -390,6 +316,11 @@ int CTv::SetCurrenSourceInfo(tvin_info_t sig_info)
 
 tvin_info_t CTv::GetCurrentSourceInfo(void)
 {
+    if (mCurrentSource == SOURCE_DTV) {//DTV
+        //todo
+    } else {//Other source
+        //todo
+    }
     LOGD("mCurrentSource = %d, trans_fmt is %d,fmt is %d, status is %d.\n",
             mCurrentSource, mCurrentSignalInfo.trans_fmt, mCurrentSignalInfo.fmt, mCurrentSignalInfo.status);
     return mCurrentSignalInfo;
@@ -426,55 +357,10 @@ int CTv::SetEDIDData(tv_source_input_t source, char *data)
 int CTv::GetEDIDData(tv_source_input_t source, char *data)
 {
     char edidData[REAL_EDID_DATA_SIZE];
-    char edidFileName[100] = {0};
-    int port = (int)source - SOURCE_HDMI1 + 1;
-    int edidVer = (GetEdidVersion(source) == HDMI_EDID_VER_20)?20:14;
-    char dv_support[4] = {0};
-
-    const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, "/vendor/etc/tvconfig/hdmi");
-
-    if (GetDolbyVisionSupportStatus() == 1)
-        strcpy(dv_support, "_dv");
-
     memset(edidData, 0, REAL_EDID_DATA_SIZE);
-    sprintf(edidFileName, "%s/port%d_%d%s.bin", edidFilePath, port, edidVer, dv_support);
-    LOGD("%s: EDID file: %s\n", __FUNCTION__, edidFileName);
-    ReadDataFromFile(edidFileName, 0, REAL_EDID_DATA_SIZE, edidData);
+    //ReadDataFromFile(HDMI_EDID14_FILE_PATH, 0, REAL_EDID_DATA_SIZE, edidData);
     memcpy(data, edidData, REAL_EDID_DATA_SIZE);
     return 0;
-}
-
-#define MMC_DEVICE      ("/dev/mmcblk0")
-#define PANEL_ID_OFFSET 0x9000004
-int CTv::GetPanelSize()
-{
-    int fd, len, panelSize=0;
-    off_t offset = 0L;
-    char buf[2] = {0}, psize[8]={0};
-
-    if ((fd = open(MMC_DEVICE, O_RDONLY)) < 0) {
-        LOGE("open %s error(%s)", MMC_DEVICE, strerror (errno));
-        return 0;
-    }
-
-    offset = lseek (fd, PANEL_ID_OFFSET, SEEK_SET);
-    if ( offset !=  PANEL_ID_OFFSET ) {
-        LOGE("Failed to seek. offset[0x%x] requested[0x%x]\n", (uint32_t)offset, PANEL_ID_OFFSET);
-        close(fd);
-        return 0;
-    }
-
-    len = read(fd, buf, 2);
-    if (len < 0) {
-        LOGE("Read %s error, %s\n", MMC_DEVICE, strerror(errno));
-        close(fd);
-        return 0;
-    }
-    sprintf(psize, "%d", buf[1]);
-    panelSize = atoi(psize);
-
-    close(fd);
-    return panelSize;
 }
 
 int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
@@ -483,87 +369,50 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
         mpTvin->Tvin_StopDecoder();
     }
 
-    char edidLoadBuf[(TVIN_PORT_ID_MAX - 1) * 2 * REAL_EDID_DATA_SIZE];
+    char edidLoadBuf[6 * REAL_EDID_DATA_SIZE] = {0};
+    char edidReadBuf[REAL_EDID_DATA_SIZE] = {0};
     char edidFileName[100] = {0};
     int loadNum = 1;
-    int i = 0;
-    tvin_port_t tvin_port = TVIN_PORT_NULL;
-    ui_hdmi_port_id_t ui_port = UI_HDMI_PORT_ID_MAX;
-    tv_source_input_t source_input;
-    const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI,
-            CFG_HDMI_EDID_FILE_PATH,
-            "/vendor/etc/tvconfig/hdmi");
-    LOGD("%s: sizeof edidLoadBuf:[%d] isDolbyVisionEnable = %d.\n",
-            __FUNCTION__,
-            sizeof(edidLoadBuf),
-            isDolbyVisionEnable);
-    memset(edidLoadBuf, 0, sizeof(edidLoadBuf));
-    for (loadNum = (int)TVIN_PORT_ID_1; loadNum < (int)TVIN_PORT_ID_MAX; loadNum++) {
-        tvin_port = mpTvin->Tvin_GetVdinPortByVdinPortID((tvin_port_id_t)loadNum);
-        source_input = mpTvin->Tvin_PortToSourceInput(tvin_port);
-        ui_port = mpTvin->Tvin_GetUIHdmiPortIdBySourceInput(source_input);
-        LOGD("%s:tvin port ID:%d tvin_port:0x%x source_input:%d ui_port:%d\n",
-                __FUNCTION__,
-                loadNum,
-                tvin_port,
-                source_input,
-                ui_port);
-
-        // Load EDID 1.4 then load EDID 2.0.
-        for (i = 0; i < 2; i++) {
-            /* sprintf will add a null-terminated character ('\0') at the end of
-               the formatted string. So, do not need to memset the buffer.*/
-            sprintf(edidFileName, "%s/port%d_%s%s.bin",
-                    edidFilePath,
-                    ui_port,
-                    i ? "20" : "14",
-                    isDolbyVisionEnable ? "_dv" : "");
-            if (!isFileExist(edidFileName))
-                sprintf(edidFileName, "%s/port%d_%s%s.bin",
-                        edidFilePath,
-                        UI_HDMI_PORT_ID_1,
-                        i ? "20" : "14",
-                        isDolbyVisionEnable ? "_dv" : "");
-            ReadDataFromFile(edidFileName,
-                    0,
-                    REAL_EDID_DATA_SIZE,
-                    edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE);
-            LOGD("%s:File:%s\n", __FUNCTION__, edidFileName);
+    const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, CONFIG_EDID_FILE_PATH_DEF);
+    const char *dolbyModulePath = ConfigGetStr(CFG_SECTION_SETTING, CFG_DOLBY_MODULE, DOLBY_VISION_TV_KO_PATH);
+    bool isDolbyVisionKoExist = isFileExist(dolbyModulePath) || isFileExist(DOLBY_VISION_STB_KO_PATH);
+    LOGD("%s: isDolbyVisionKoExist = %d, isDolbyVisionEnable = %d.\n", __FUNCTION__, isDolbyVisionKoExist, isDolbyVisionEnable);
+    if (isDolbyVisionKoExist && (isDolbyVisionEnable == 1)) {
+        for (loadNum=1;loadNum<7;loadNum++) {
+            LOGD("%s: load dolby vision EDID!\n", __FUNCTION__);
+            if (loadNum%2 != 0) {
+                sprintf(edidFileName, "%s/port%d_14_dv.bin", edidFilePath, loadNum/2 + 1);
+            } else {
+                sprintf(edidFileName, "%s/port%d_20_dv.bin", edidFilePath, loadNum/2);
+            }
+            memset(edidReadBuf, 0, REAL_EDID_DATA_SIZE);
+            ReadDataFromFile(edidFileName, 0, REAL_EDID_DATA_SIZE, edidReadBuf);
+            memcpy(edidLoadBuf + (loadNum-1)*REAL_EDID_DATA_SIZE, edidReadBuf, REAL_EDID_DATA_SIZE);
+        }
+    } else {
+        for (loadNum=1;loadNum<7;loadNum++) {
+            LOGD("%s: load ordinary EDID!\n", __FUNCTION__);
+            if (loadNum%2 != 0) {
+                sprintf(edidFileName, "%s/port%d_14.bin", edidFilePath, loadNum/2 + 1);
+            } else {
+                sprintf(edidFileName, "%s/port%d_20.bin", edidFilePath, loadNum/2);
+            }
+            memset(edidReadBuf, 0, REAL_EDID_DATA_SIZE);
+            ReadDataFromFile(edidFileName, 0, REAL_EDID_DATA_SIZE, edidReadBuf);
+            memcpy(edidLoadBuf + (loadNum-1)*REAL_EDID_DATA_SIZE, edidReadBuf, REAL_EDID_DATA_SIZE);
         }
     }
-    int ret = mpHDMIRxManager->HdmiRxEdidDataSwitch(2 * K_PORT_NUM, edidLoadBuf);
+
+    int ret = mpHDMIRxManager->HdmiRxEdidDataSwitch(6, edidLoadBuf);
     if (ret == 0) {
-        ui_hdmi_port_id_t portId = UI_HDMI_PORT_ID_MAX;
+        tvin_port_id_t portId = TVIN_PORT_ID_MAX;
         int edidSetValue = 0;
         int portEdidVersion = 0;
         for (int i=SOURCE_HDMI1;i<SOURCE_VGA;i++) {
-            portId = mpTvin->Tvin_GetUIHdmiPortIdBySourceInput((tv_source_input_t)i);
+            portId = mpTvin->Tvin_GetHdmiPortIdBySourceInput((tv_source_input_t)i);
             portEdidVersion = GetEdidVersion((tv_source_input_t)i);
             edidSetValue |=  (portEdidVersion << (4*portId - 4));
         }
-        LOGD("%s:[edidSetValue:0x%x]", __FUNCTION__, edidSetValue);
-        //for HDMI feature(allm,vrr) status init
-        const char *buf = GetUenv(HDMI_UBOOT_EDID_FEATURE);
-        int value = 0;
-        int allmEnable = 0;
-        int VrrEnable = 0;
-        if (buf) {
-            value = atoi(buf);
-            allmEnable = (value & 1);
-            VrrEnable = ((value >> 1) & 1);
-            LOGD("%s init HDMI feature status allmEnable:%d, VrrEnable:%d.\n",
-                __FUNCTION__, allmEnable, VrrEnable);
-            mpHDMIRxManager->SetHDMIFeatureInit(allmEnable, VrrEnable);
-        } else {
-            allmEnable = mpHDMIRxManager->GetAllmEnabled();
-            VrrEnable = mpHDMIRxManager->GetVrrEnabled();
-            value = ((VrrEnable << 1)|allmEnable);
-            LOGD("%s HDMI feature uenv unexist, save it allmEnable:%d, VrrEnable:%d.\n",
-                __FUNCTION__ , allmEnable, VrrEnable);
-            SetUenv(HDMI_UBOOT_EDID_FEATURE, std::to_string(value).c_str());
-        }
-
-        LOGD("%s [UI sequence] edidSetValue:0x%x\n", __FUNCTION__, edidSetValue);
         ret = mpHDMIRxManager->HdmiRxEdidVerSwitch(edidSetValue);
     } else {
         LOGE("%s failed!\n", __FUNCTION__);
@@ -580,12 +429,11 @@ int CTv::SetEdidVersion(tv_source_input_t source, tv_hdmi_edid_version_t edidVer
     tv_hdmi_edid_version_t currentVersion = (tv_hdmi_edid_version_t)GetEdidVersion(source);
     if (currentVersion != edidVer) {
         mpTvin->Tvin_StopDecoder();
-        ui_hdmi_port_id_t portId = UI_HDMI_PORT_ID_MAX;
+        tvin_port_id_t portId = TVIN_PORT_ID_MAX;
         int edidSetValue = 0;
-        //We have already set the port map to kernel.So we should use UI sequence.
         int portEdidVersion = 0;
         for (int i=SOURCE_HDMI1;i<SOURCE_VGA;i++) {
-            portId = mpTvin->Tvin_GetUIHdmiPortIdBySourceInput((tv_source_input_t)i);
+            portId = mpTvin->Tvin_GetHdmiPortIdBySourceInput((tv_source_input_t)i);
             if (i == source) {
                 portEdidVersion = edidVer;
             } else {
@@ -593,7 +441,6 @@ int CTv::SetEdidVersion(tv_source_input_t source, tv_hdmi_edid_version_t edidVer
             }
             edidSetValue |=  (portEdidVersion << (4*portId - 4));
         }
-        LOGD("%s [UI sequence] edidSetValue:0x%x\n", __FUNCTION__, edidSetValue);
         ret = mpHDMIRxManager->HdmiRxEdidVerSwitch(edidSetValue);
         if (mCurrentSource == source) {
             mpHDMIRxManager->HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
@@ -602,7 +449,7 @@ int CTv::SetEdidVersion(tv_source_input_t source, tv_hdmi_edid_version_t edidVer
             LOGE("%s failed.\n", __FUNCTION__);
             ret = -1;
         } else {
-            /*
+            //TODO:add user setting read/write flow
             switch (source) {
             case SOURCE_HDMI1:
                 Hdmi1CurrentEdidVer = edidVer;
@@ -620,8 +467,6 @@ int CTv::SetEdidVersion(tv_source_input_t source, tv_hdmi_edid_version_t edidVer
                 LOGD("%s: not hdmi source.\n", __FUNCTION__);
                 break;
             }
-            */
-            SetUenv(HDMI_UBOOT_EDID_VERSION, std::to_string(edidSetValue).c_str());
         }
     } else {
         LOGD("%s: same EDID version, no need set.\n", __FUNCTION__);
@@ -636,29 +481,18 @@ int CTv::GetEdidVersion(tv_source_input_t source)
 {
     //TODO:add user setting read/write flow
     int retValue = HDMI_EDID_VER_14;
-    const char *buf = GetUenv(HDMI_UBOOT_EDID_VERSION);
-    int version = 0;
-    ui_hdmi_port_id_t port_id = UI_HDMI_PORT_ID_MAX;
-    if (buf) {
-        version = atoi(buf);
-    }
-    port_id = mpTvin->Tvin_GetUIHdmiPortIdBySourceInput(source);
-    switch (port_id) {
-    case UI_HDMI_PORT_ID_1:
-        //retValue = Hdmi1CurrentEdidVer;
-        retValue = version & 0xf;
+    switch (source) {
+    case SOURCE_HDMI1:
+        retValue = Hdmi1CurrentEdidVer;
         break;
-    case UI_HDMI_PORT_ID_2:
-        //retValue = Hdmi2CurrentEdidVer;
-        retValue = (version >> 4) & 0xf;
+    case SOURCE_HDMI2:
+        retValue = Hdmi2CurrentEdidVer;
         break;
-    case UI_HDMI_PORT_ID_3:
-        //retValue = Hdmi3CurrentEdidVer;
-        retValue = (version >> 8) & 0xf;
+    case SOURCE_HDMI3:
+        retValue = Hdmi3CurrentEdidVer;
         break;
-    case UI_HDMI_PORT_ID_4:
-        //retValue = Hdmi4CurrentEdidVer;
-        retValue = (version >> 12) & 0xf;
+    case SOURCE_HDMI4:
+        retValue = Hdmi4CurrentEdidVer;
         break;
     default:
         LOGD("%s: not hdmi source.\n", __FUNCTION__);
@@ -671,35 +505,6 @@ int CTv::SetVdinWorkMode(vdin_work_mode_t vdinWorkMode)
 {
     mVdinWorkMode = vdinWorkMode;
     return 0;
-}
-
-int CTv::GetHdmiSPDInfo(tv_source_input_t source, char* data, size_t datalen)
-{
-    if (mCurrentSource < SOURCE_HDMI1 || mCurrentSource > SOURCE_HDMI4) {
-        LOGE("Current source is not HDMI input source.\n");
-        return -1;
-    }
-    if (source != mCurrentSource) {
-        LOGE("%d is not current input source, skipped.\n", source);
-        return -1;
-    }
-
-    int ret = -1;
-    struct spd_infoframe_st spd;
-
-    memset(&spd, 0, sizeof(spd));
-    ret = mpHDMIRxManager->HdmiRxGetSPDInfoframe(&spd);
-    if (ret < 0) {
-        LOGE("Get SPD infoframe from HDMIRX manager failed.\n");
-    } else {
-        if (datalen > sizeof(spd)) {
-            memcpy(data, &spd, sizeof(spd));
-        } else {
-            memcpy(data, &spd, datalen);
-        }
-    }
-
-    return ret;
 }
 
 int CTv::GetFrontendInfo(tvin_frontend_info_t *frontendInfo)
@@ -753,21 +558,6 @@ int CTv::GetSourceConnectStatus(tv_source_input_t source)
     return mTvDevicesPollDetect.GetSourceConnectStatus(source);
 }
 
-int CTv::SetEdidBoostOn(int bBoostOn)
-{
-    int ret = -1;
-    if (mBoostOn == bBoostOn ) {
-        LOGD("%s: same EDIDs are loaded for %d, no more action\n", __FUNCTION__, bBoostOn);
-        return 0;
-    } else {
-        LOGD("%s: mBoostOn=%d to be switched to %d\n", __FUNCTION__, mBoostOn, bBoostOn);
-        // pass flag for dynamic loading EDID data, switch data to kernel and switch version.
-        mBoostOn = bBoostOn;
-        ret = LoadEdidData(0, mDolbyVisionEnableState);
-        return ret;
-    }
-}
-
 void CTv::onSigToStable()
 {
     LOGD("%s: mVdinWorkMode is %d\n", __FUNCTION__, mVdinWorkMode);
@@ -778,17 +568,8 @@ void CTv::onSigToStable()
         LOGD("%s: not VFM mode.\n", __FUNCTION__);
     }*/
     mpTvin->Tvin_StartDecoder(mCurrentSignalInfo);
-
-#ifdef HAVE_AUDIO
-            CTvAudio::getInstance()->set_audio_av_mute(false);
-#endif
-
-    CMessage msg;
-    msg.mDelayMs = std::chrono::milliseconds(0);
-    msg.mType = CTvMsgQueue::TV_MSG_ENABLE_VIDEO_LATER;
-    msg.mpPara[0] = 5;
-    mTvMsgQueue->sendMsg ( msg );
-
+    mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_ENABLE);
+    mpAmVideo->SetVideoGlobalOutputMode(VIDEO_GLOBAL_OUTPUT_MODE_ENABLE);
     //send signal to apk
     TvEvent::SignalDetectEvent event;
     event.mSourceInput = mCurrentSource;
@@ -796,19 +577,12 @@ void CTv::onSigToStable()
     event.mTrans_fmt = mCurrentSignalInfo.trans_fmt;
     event.mStatus = mCurrentSignalInfo.status;
     event.mDviFlag = mCurrentSignalInfo.is_dvi;
-    event.mhdr_info = mCurrentSignalInfo.signal_type;
     sendTvEvent(event);
 }
 
 void CTv::onSigToUnstable()
 {
-
-    mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
     mpTvin->Tvin_StopDecoder();
-
-#ifdef HAVE_AUDIO
-            CTvAudio::getInstance()->set_audio_av_mute(true);
-#endif
 
     LOGD("signal to Unstable!\n");
     //To do
@@ -818,20 +592,13 @@ void CTv::onSigToUnSupport()
 {
     LOGD("%s\n", __FUNCTION__);
 
-    mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
     mpTvin->Tvin_StopDecoder();
-
-#ifdef HAVE_AUDIO
-            CTvAudio::getInstance()->set_audio_av_mute(true);
-#endif
-
     TvEvent::SignalDetectEvent event;
     event.mSourceInput = mCurrentSource;
     event.mFmt = mCurrentSignalInfo.fmt;
     event.mTrans_fmt = mCurrentSignalInfo.trans_fmt;
     event.mStatus = mCurrentSignalInfo.status;
     event.mDviFlag = mCurrentSignalInfo.is_dvi;
-    event.mhdr_info = mCurrentSignalInfo.signal_type;
     sendTvEvent(event);
     //To do
 }
@@ -844,15 +611,12 @@ void CTv::onSigToNoSig()
         SetSnowShowEnable(true);
         mpTvin->Tvin_StartDecoder(mCurrentSignalInfo);
         mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_ENABLE);
+        CVpp::getInstance()->VPP_setVideoColor(false);
 
     }  else {
         LOGD("%s video layer has disabled \n", __FUNCTION__);
-        mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
+        CVpp::getInstance()->VPP_setVideoColor(false);
         mpTvin->Tvin_StopDecoder();
-
-    #ifdef HAVE_AUDIO
-        CTvAudio::getInstance()->set_audio_av_mute(true);
-    #endif
     }
 
     TvEvent::SignalDetectEvent event;
@@ -861,7 +625,6 @@ void CTv::onSigToNoSig()
     event.mTrans_fmt = mCurrentSignalInfo.trans_fmt;
     event.mStatus = mCurrentSignalInfo.status;
     event.mDviFlag = mCurrentSignalInfo.is_dvi;
-    event.mhdr_info = mCurrentSignalInfo.signal_type;
     sendTvEvent (event);
     //To do
 }
@@ -913,6 +676,7 @@ int CTv::mapSourcetoAudiotupe(tv_source_input_t dest_source)
     int ret = -1;
     switch (dest_source) {
         case SOURCE_TV:
+        case SOURCE_DTV:
             ret = AUDIO_DEVICE_IN_TV_TUNER;
             break;
         case SOURCE_AV1:
@@ -935,143 +699,3 @@ int CTv::mapSourcetoAudiotupe(tv_source_input_t dest_source)
     return ret;
 }
 #endif
-
-bool CTv::GetDolbyVisionSupportStatus(void) {
-    //return dv support info from current platform device, not display device.
-    char buf[1024+1] = {0};
-    int fd, len;
-    bool ret = false;
-
-    /*bit0: 0-> efuse, 1->no efuse; */
-    /*bit1: 1-> ko loaded*/
-    /*bit2: 1-> value updated*/
-    /*bit3: 1-> tv */
-    int supportInfo = 0;
-
-    constexpr int dvDriverEnabled = (1 << 2);
-    constexpr int dvSupported = ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3 ));
-
-    if ((fd = open(SYS_DOLBYVISION_SUPPORT_INFO, O_RDONLY)) < 0) {
-        LOGE("open %s fail.\n", SYS_DOLBYVISION_SUPPORT_INFO);
-        return false;
-    } else {
-        if ((len = read(fd, buf, 1024)) < 0) {
-            LOGE("read %s error: %s\n", SYS_DOLBYVISION_SUPPORT_INFO, strerror(errno));
-            ret =  false;
-        } else {
-            sscanf(buf, "%d", &supportInfo);
-            if ((supportInfo & dvDriverEnabled) == 0) {
-                LOGD("%s is not ready\n",SYS_DOLBYVISION_SUPPORT_INFO);
-            }
-            ret = ((supportInfo & dvSupported) == dvSupported) ? true : false;
-        }
-
-        close(fd);
-        return ret;
-    }
-}
-
-int CTv::SetHdmiAllmEnabled(int enable)
-{
-    LOGD("%s: [%s]\n", __FUNCTION__, enable == 1?"enable":"disable");
-    const char *buf = GetUenv(HDMI_UBOOT_EDID_FEATURE);
-    int saveValue = 0;
-    if (buf) {
-        saveValue = atoi(buf);
-        if ((saveValue & 0x1) == enable) {
-            LOGD("%s: same status return!\n", __FUNCTION__);
-            return 0;
-        }
-    }
-    muteVideoOnHDMISource();
-    saveValue = enable|(saveValue & 0b0010);
-    SetUenv(HDMI_UBOOT_EDID_FEATURE,  std::to_string(saveValue).c_str());
-    return mpHDMIRxManager->SetAllmEnabled(enable);
-}
-
-int CTv::GetHdmiAllmEnabled()
-{
-    int ret = mpHDMIRxManager->GetAllmEnabled();
-    LOGD("%s: [%d]\n", __FUNCTION__, ret);
-    return ret;
-}
-
-int CTv::SetHdmiVrrEnabled(int enable)
-{
-    LOGD("%s: [%s]\n", __FUNCTION__, enable == 1?"enable":"disable");
-    const char*buf = GetUenv(HDMI_UBOOT_EDID_FEATURE);
-    int saveValue = 0;
-    if (buf) {
-        saveValue = atoi(buf);
-        if ((saveValue >> 1) == enable) {
-            LOGD("%s: same status return!\n", __FUNCTION__);
-            return 0;
-        }
-    }
-    muteVideoOnHDMISource();
-    saveValue = (enable << 1)|(saveValue & 0b0001);
-    SetUenv(HDMI_UBOOT_EDID_FEATURE,  std::to_string(saveValue).c_str());
-    return mpHDMIRxManager->SetVrrEnabled(enable);
-}
-
-int CTv::GetHdmiVrrEnabled()
-{
-    int ret = mpHDMIRxManager->GetVrrEnabled();
-    LOGD("%s: [%d]\n", __FUNCTION__, ret);
-    return ret;
-}
-
-void CTv::muteVideoOnHDMISource() {
-    if (mCurrentSource < SOURCE_HDMI1 || mCurrentSource > SOURCE_HDMI4) {
-        return;
-    }
-    mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
-}
-
-void CTv::isVideoFrameAvailable(unsigned int u32NewFrameCount)
-{
-    unsigned int u32TimeOutCount = 0;
-    unsigned int  frameCount = 0;
-    while (true) {
-        frameCount = (unsigned int)mpAmVideo->GetVideoFrameCount();
-        if (frameCount >= u32NewFrameCount) {
-            LOGD("%s video available\n", __FUNCTION__);
-            break;
-        } else {
-            if (u32TimeOutCount >= NEW_FRAME_TIME_OUT_COUNT) {
-                LOGD("%s Not available frame\n", __FUNCTION__);
-                break;
-            }
-        }
-        LOGD("%s new frame count = %d, get time = %d\n",__FUNCTION__, frameCount, u32TimeOutCount);
-        usleep(50*1000);
-        u32TimeOutCount++;
-    }
-    mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_ENABLE);
-    mpAmVideo->SetVideoGlobalOutputMode(VIDEO_GLOBAL_OUTPUT_MODE_ENABLE);
-}
-
-CTv::CTvMsgQueue::CTvMsgQueue(CTv *tv)
-{
-    mpTv = tv;
-}
-
-CTv::CTvMsgQueue::~CTvMsgQueue()
-{
-}
-
-void CTv::CTvMsgQueue::handleMessage ( CMessage &msg )
-{
-    LOGD ("%s, CTv::CTvMsgQueue::handleMessage type = %d\n", __FUNCTION__,  msg.mType);
-
-    switch ( msg.mType ) {
-    case TV_MSG_ENABLE_VIDEO_LATER: {
-        int fc = msg.mpPara[0];
-        mpTv->isVideoFrameAvailable(fc);
-        break;
-    }
-    default:
-        break;
-    }
-}
-

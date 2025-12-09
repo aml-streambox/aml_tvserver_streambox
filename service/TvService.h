@@ -13,7 +13,6 @@
 #include <binder/Binder.h>
 #include <binder/Parcel.h>
 #include "CTv.h"
-#include "tvcmd.h"
 #include <map>
 
 using namespace android;
@@ -33,22 +32,14 @@ public:
         EVT_SIG_DT_CB = IBinder::FIRST_CALL_TRANSACTION + 5,
         DATA_SET_ACTION = IBinder::FIRST_CALL_TRANSACTION + 6,
         DATA_GET_ACTION = IBinder::FIRST_CALL_TRANSACTION + 7,
-        CMD_DATA_REQ  = IBinder::FIRST_CALL_TRANSACTION + 8,
-        EVT_SIG_DV_ALLM = IBinder::FIRST_CALL_TRANSACTION + 9,
-        CMT_GET_ALLM_INFO = IBinder::FIRST_CALL_TRANSACTION + 10,
-        EVT_SIG_VRR_CB = IBinder::FIRST_CALL_TRANSACTION + 11,
-
     };
 
 private:
     virtual void onTvEvent(CTvEvent &event);
     int SendSignalForSignalDetectEvent(CTvEvent &event);
     int SendSignalForSourceConnectEvent(CTvEvent &event);
-    int SendSignalForDvAllmEvent(CTvEvent &event);
-    int SendSignalForVrrEvent(CTvEvent &event);
     int ParserTvCommand(const char *commandData);
     int ParserTvDataCommand(const char *commandBuf, unsigned char *dataBuf);
-    int HandleDataRequest(const char* cmdtype, const char* cmd, tvcmd_e subcmd, tv_source_input_t source, char* data, size_t length);
 
     int SetTvServiceCallBack(sp<IBinder> callBack);
     int RemoveTvServiceCallBack(int callBackId);

@@ -7,7 +7,7 @@
  * Description:
  */
 
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CVpp"
 
 #include "CVpp.h"
@@ -90,12 +90,6 @@ int CVpp::getVideoScreenMode()
 
     tvReadSysfs(VIDEO_SCREEN_MODE, buf);
     return atoi(buf);
-}
-
-int CVpp::setVideoaxis ()
-{
-    tvWriteSysfs(VIDEO_AXIS_MODE, VIDEO_AXIS_FULL);
-    return 0;
 }
 
 

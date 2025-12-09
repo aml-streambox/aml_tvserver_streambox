@@ -6,7 +6,7 @@
  *
  * Description:
  */
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "TvService"
 
 #include <stdio.h>
@@ -35,7 +35,6 @@ TvService *TvService::GetInstance() {
 }
 
 TvService::TvService() {
-    init_tv_logging();
     mpTv = new CTv();
     mpTv->setTvObserver(this);
 }
@@ -53,12 +52,6 @@ void TvService::onTvEvent(CTvEvent &event) {
         break;
     case CTvEvent::TV_EVENT_SOURCE_CONNECT:
         SendSignalForSourceConnectEvent(event);
-        break;
-    case CTvEvent::TV_EVENT_SIG_DV_ALLM:
-        SendSignalForDvAllmEvent(event);
-        break;
-    case CTvEvent::TV_EVENT_SIG_CHG_VRR:
-        SendSignalForVrrEvent(event);
         break;
     default :
         LOGE("TvService: invalie event type!\n");
@@ -90,52 +83,6 @@ int TvService::SendSignalForSourceConnectEvent(CTvEvent &event)
     return 0;
 }
 
-int TvService::SendSignalForDvAllmEvent(CTvEvent &event)
-{
-    LOGD("%s\n", __FUNCTION__);
-    Parcel send, reply;
-
-    TvEvent::SignalDvAllmEvent *signalDvAllmEvent = (TvEvent::SignalDvAllmEvent *)(&event);
-    int clientSize = mTvServiceCallBack.size();
-    LOGD("%s: now has %d tvclient.\n", __FUNCTION__, clientSize);
-    for (int i = 0; i < clientSize; i++) {
-        if (mTvServiceCallBack[i] != NULL) {
-            send.writeInt32(signalDvAllmEvent->allm_mode);
-            send.writeInt32(signalDvAllmEvent->it_content);
-            send.writeInt32(signalDvAllmEvent->cn_type);
-            LOGD("send dv_allm evt(%d,%d,%d) to client.\n",
-                 signalDvAllmEvent->allm_mode, signalDvAllmEvent->it_content, signalDvAllmEvent->cn_type);
-            mTvServiceCallBack[i]->transact(EVT_SIG_DV_ALLM, send, &reply);
-        } else {
-            LOGD("Event callback is null.\n");
-            return -ENODEV;
-        }
-    }
-    return 0;
-}
-
-int TvService::SendSignalForVrrEvent(CTvEvent &event)
-{
-    LOGD("%s\n", __FUNCTION__);
-    Parcel send, reply;
-
-    TvEvent::SignalVrrEvent *signalVrrEvent = (TvEvent::SignalVrrEvent *)(&event);
-    int clientSize = mTvServiceCallBack.size();
-    LOGD("%s: now has %d tvclient.\n", __FUNCTION__, clientSize);
-    for (int i = 0; i < clientSize; i++) {
-        if (mTvServiceCallBack[i] != NULL) {
-            send.writeInt32(signalVrrEvent->cur_vrr_status);
-            LOGD("send vrr evt(%d) to client.\n",
-                 signalVrrEvent->cur_vrr_status);
-            mTvServiceCallBack[i]->transact(EVT_SIG_VRR_CB, send, &reply);
-        } else {
-            LOGD("Event callback is null.\n");
-            return -ENODEV;
-        }
-    }
-    return 0;
-}
-
 int TvService::SendSignalForSignalDetectEvent(CTvEvent &event)
 {
     LOGD("%s\n", __FUNCTION__);
@@ -152,7 +99,6 @@ int TvService::SendSignalForSignalDetectEvent(CTvEvent &event)
             send.writeInt32(signalDetectEvent->mTrans_fmt);
             send.writeInt32(signalDetectEvent->mStatus);
             send.writeInt32(signalDetectEvent->mDviFlag);
-            send.writeUint32(signalDetectEvent->mhdr_info);
             mTvServiceCallBack[i]->transact(EVT_SIG_DT_CB, send, &reply);
         } else {
             LOGD("Event callback is null.\n");
@@ -179,41 +125,38 @@ int TvService::ParserTvCommand(const char *commandData)
     if (strcmp(temp, "control") == 0) {
         LOGD("%s: control cmd!\n", __FUNCTION__);
         temp = strtok(NULL, delimitation);
-        int moduleID = atoi(temp);
-        if (moduleID == TV_CONTROL_START_TV) {
+        int moudleID = atoi(temp);
+        if (moudleID == TV_CONTROL_START_TV) {
             temp = strtok(NULL, delimitation);
             tv_source_input_t startSource = (tv_source_input_t)atoi(temp);
             ret = mpTv->StartTv(startSource);
-        } else if (moduleID == TV_CONTROL_STOP_TV) {
+        } else if (moudleID == TV_CONTROL_STOP_TV) {
             temp = strtok(NULL, delimitation);
             tv_source_input_t stopSource = (tv_source_input_t)atoi(temp);
             ret = mpTv->StopTv(stopSource);
-        } else if (moduleID == TV_CONTROL_VDIN_WORK_MODE_SET) {
+        } else if (moudleID == TV_CONTROL_VDIN_WORK_MODE_SET) {
             temp = strtok(NULL, delimitation);
             vdin_work_mode_t setVdinWorkMode = (vdin_work_mode_t)atoi(temp);
             ret = mpTv->SetVdinWorkMode(setVdinWorkMode);
-        } else if (moduleID == TV_CONTROL_GET_FRAME_HEIGHT) {
+        } else if (moudleID == TV_CONTROL_GET_FRAME_HEIGHT) {
             mpTv->GetFrontendInfo(&frontendInfo);
             ret = frontendInfo.height;
-        } else if (moduleID == TV_CONTROL_GET_FRAME_WIDTH) {
+        } else if (moudleID == TV_CONTROL_GET_FRAME_WIDTH) {
             mpTv->GetFrontendInfo(&frontendInfo);
             ret = frontendInfo.width;
-        } else if (moduleID == TV_CONTROL_GET_FRAME_RATE) {
+        } else if (moudleID == TV_CONTROL_GET_FRAME_RATE) {
             mpTv->GetFrontendInfo(&frontendInfo);
             ret = frontendInfo.fps;
-        } else if (moduleID == TV_CONTROL_GET_COLOR_DEPTH) {
+        } else if (moudleID == TV_CONTROL_GET_COLOR_DEPTH) {
             mpTv->GetFrontendInfo(&frontendInfo);
             ret = frontendInfo.colordepth;
-        } else if (moduleID == TV_CONTROL_GET_LINE_SCAN_MODE) {
+        } else if (moudleID == TV_CONTROL_GET_LINE_SCAN_MODE) {
             mpTv->GetFrontendInfo(&frontendInfo);
             ret = frontendInfo.scan_mode;
-        } else if (moduleID == TV_CONTROL_GET_CONNECT_STATUS) {
+        } else if (moudleID == TV_CONTROL_GET_CONNECT_STATUS) {
             temp = strtok(NULL, delimitation);
             tv_source_input_t source = (tv_source_input_t)atoi(temp);
             ret = mpTv->GetSourceConnectStatus(source);
-        } else if (moduleID == TV_CONTROL_SET_BOOST_ON) {
-            temp = strtok(NULL, delimitation);
-            ret = mpTv->SetEdidBoostOn(atoi(temp));
         } else {
             LOGD("%s: invalid sourec cmd!\n", __FUNCTION__);
         }
@@ -222,10 +165,10 @@ int TvService::ParserTvCommand(const char *commandData)
         temp = strtok(NULL, delimitation);
         if (strcmp(temp, "set") == 0) {
             temp = strtok(NULL, delimitation);
-            int moduleID = atoi(temp);
+            int moudleID = atoi(temp);
             temp = strtok(NULL, delimitation);
             tv_source_input_t setSource = (tv_source_input_t)atoi(temp);
-            if (moduleID == HDMI_EDID_VER_SET) {
+            if (moudleID == HDMI_EDID_VER_SET) {
                 temp = strtok(NULL, delimitation);
                 tv_hdmi_edid_version_t setVersion = (tv_hdmi_edid_version_t)atoi(temp);
                 ret = mpTv->SetEdidVersion(setSource, setVersion);
@@ -235,10 +178,10 @@ int TvService::ParserTvCommand(const char *commandData)
             }
         } else if (strcmp(temp, "get") == 0) {
             temp = strtok(NULL, delimitation);
-            int moduleID = atoi(temp);
+            int moudleID = atoi(temp);
             temp = strtok(NULL, delimitation);
             tv_source_input_t getSource = (tv_source_input_t)atoi(temp);
-            if (moduleID == HDMI_EDID_VER_GET) {
+            if (moudleID == HDMI_EDID_VER_GET) {
                 ret = mpTv->GetEdidVersion(getSource);
             } else {
                 LOGD("%s: invalid EDID get cmd!\n", __FUNCTION__);
@@ -251,37 +194,19 @@ int TvService::ParserTvCommand(const char *commandData)
     } else if (strcmp(temp, "hdmi") == 0) {
         LOGD("%s: hdmi cmd!\n", __FUNCTION__);
         temp = strtok(NULL, delimitation);
-        int moduleID = atoi(temp);
-        if (moduleID == HDMI_GET_COLOR_FORMAT) {
+        int moudleID = atoi(temp);
+        if (moudleID == HDMI_GET_COLOR_FORMAT) {
             tvinSignalInfo = mpTv->GetCurrentSourceInfo();
             ret = tvinSignalInfo.cfmt;
-        } else if (moduleID == HDMI_GET_COLOR_RANGE) {
+        } else if (moudleID == HDMI_GET_COLOR_RANGE) {
             mpTv->GetFrontendInfo(&frontendInfo);
             ret = mpTv->GetColorRangeMode();
-        } else if (moduleID == HDMI_GET_COLOR_DEPTH) {
+        } else if (moudleID == HDMI_GET_COLOR_DEPTH) {
             tvinSignalInfo = mpTv->GetCurrentSourceInfo();
             ret = frontendInfo.colordepth;
-        } else if (moduleID == HDMI_GET_ASPECT_RATIO) {
+        } else if (moudleID == HDMI_GET_ASPECT_RATIO) {
             tvinSignalInfo = mpTv->GetCurrentSourceInfo();
             ret = tvinSignalInfo.aspect_ratio;
-        } else if (moduleID == HDMI_SET_COLOR_RANGE) {
-            temp = strtok(NULL, delimitation);
-            int mode = atoi(temp);
-            ret = mpTv->SetColorRangeMode((tvin_color_range_t)mode);
-        } else if (moduleID == HDMI_SET_ALLM_ENABLED) {
-            temp = strtok(NULL, delimitation);
-            int enable = atoi(temp);
-            ret = mpTv->SetHdmiAllmEnabled(enable);
-        } else if (moduleID == HDMI_GET_ALLM_ENABLED) {
-            ret = mpTv->GetHdmiAllmEnabled();
-        } else if (moduleID == HDMI_SET_VRR_ENABLED) {
-            temp = strtok(NULL, delimitation);
-            int enable = atoi(temp);
-            ret = mpTv->SetHdmiVrrEnabled(enable);
-        } else if (moduleID == HDMI_GET_VRR_ENABLED) {
-            ret = mpTv->GetHdmiVrrEnabled();
-        } else if (moduleID == HDMI_GET_VRR_MODE) {
-            ret = mpTv->GetVrrMode();
         } else {
             LOGD("%s: invalid hdmi cmd!\n", __FUNCTION__);
             ret = 0;
@@ -326,34 +251,6 @@ int TvService::ParserTvDataCommand(const char *commandBuf, unsigned char *dataBu
     }
 
     pthread_mutex_unlock(&tvservice_mutex);
-    return ret;
-}
-
-int TvService::HandleDataRequest(const char* cmdtype, const char* cmd, tvcmd_e subcmd, tv_source_input_t source, char* data, size_t length)
-{
-    int ret = 0;
-    LOGD("%s: cmdType = %s\n", __FUNCTION__, cmdtype);
-    if (strcmp(cmdtype, "pkttype") == 0) {
-        LOGD("%s: PKTTYPE cmd!\n", __FUNCTION__);
-        if (strcmp(cmd, "set") == 0) {
-            // Reserved
-        } else if (strcmp(cmd, "get") == 0) {
-            if (subcmd == HDMI_SPD_INFO_GET) {
-                ret = mpTv->GetHdmiSPDInfo(source, data, length);
-            } else if (subcmd == HDMI_EDID_DATA_GET) {
-                ret = mpTv->GetEDIDData(source, data);
-            } else {
-                LOGD("%s: invalid PKTTYPE get cmd!\n", __FUNCTION__);
-                ret = 0;
-            }
-        } else {
-            LOGD("%s: invalid cmd!\n", __FUNCTION__);
-            ret = 0;
-        }
-    } else {
-        LOGD("%s: invalie cmdtype!\n", __FUNCTION__);
-    }
-
     return ret;
 }
 
@@ -445,44 +342,6 @@ status_t TvService::onTransact(uint32_t code,
             RemoveTvServiceCallBack(data.readInt32());
             break;
         }
-        case CMD_DATA_REQ: {
-            const char* d = ".";
-            char databuf[1024];
-            char cmdstr[1024];
-
-            memset(cmdstr, 0, sizeof(cmdstr));
-            memcpy(cmdstr, data.readCString(), data.dataSize());
-
-            pthread_mutex_lock(&tvservice_mutex);
-            char* p = strtok(cmdstr, d);
-            const char* cmdtype = p;
-
-            p = strtok(NULL, d);
-            const char* cmd = p;
-            p = strtok(NULL, d);
-            tvcmd_e subcmd = (tvcmd_e) atoi(p);
-
-            p = strtok(NULL, d);
-            tv_source_input_t src = (tv_source_input_t) atoi(p);
-
-            p = strtok(NULL, d);
-            size_t datalen = atoi(p);
-
-            memset(databuf, 0, sizeof(databuf));
-            int ret = HandleDataRequest(cmdtype, cmd, subcmd, src, databuf, datalen);
-            pthread_mutex_unlock(&tvservice_mutex);
-            reply->writeInt32(ret);
-            reply->write(databuf, datalen);
-            break;
-        }
-        case CMT_GET_ALLM_INFO:
-            tvin_latency_s info;
-            memset(&info, 0x0, sizeof(tvin_latency_s));
-            mpTv->GetAllmInfo(&info);
-            reply->writeInt32((int)info.allm_mode);
-            reply->writeInt32((int)info.it_content);
-            reply->writeInt32((int)info.cn_type);
-            break;
         default:
             return BBinder::onTransact(code, data, reply, flags);
     }

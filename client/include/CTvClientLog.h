@@ -21,26 +21,25 @@ extern "C" {
 //1024 + 128
 #define DEFAULT_LOG_BUFFER_LEN 1152
 
-void init_tv_logging();
 extern int _log_print(const char *moudle_tag, const char *level_tag ,const char *class_tag, const char *fmt, ...);
 
-#ifdef LOG_MODULE_TAG
+#ifdef LOG_MOUDLE_TAG
 
 #undef LOGD
 #define LOGD(...) \
-    _log_print(LOG_MODULE_TAG, "D", LOG_CLASS_TAG, __VA_ARGS__)
+    _log_print(LOG_MOUDLE_TAG, "D", LOG_CLASS_TAG, __VA_ARGS__)
 
 #undef LOGE
 #define LOGE(...) \
-    _log_print(LOG_MODULE_TAG, "E", LOG_CLASS_TAG, __VA_ARGS__)
+    _log_print(LOG_MOUDLE_TAG, "E", LOG_CLASS_TAG, __VA_ARGS__)
 
 #undef LOGV
 #define LOGV(...) \
-    _log_print(LOG_MODULE_TAG, "W", LOG_CLASS_TAG, __VA_ARGS__)
+    _log_print(LOG_MOUDLE_TAG, "W", LOG_CLASS_TAG, __VA_ARGS__)
 
 #undef LOGI
 #define LOGI(...) \
-    _log_print(LOG_MODULE_TAG, "I", LOG_CLASS_TAG, __VA_ARGS__)
+    _log_print(LOG_MOUDLE_TAG, "I", LOG_CLASS_TAG, __VA_ARGS__)
 
 #else
 #define LOGD(...) \

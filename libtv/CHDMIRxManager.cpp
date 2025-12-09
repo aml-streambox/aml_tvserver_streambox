@@ -7,13 +7,12 @@
  * Description: c++ file
  */
 
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CHDMIRxManager"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <stdint.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <string.h>
@@ -28,7 +27,6 @@
 CHDMIRxManager::CHDMIRxManager()
 {
     mHdmiRxDeviceId = HDMIRxOpenMoudle();
-    HdmiEnableSPDFifo(true);
 }
 
 CHDMIRxManager::~CHDMIRxManager()
@@ -138,7 +136,7 @@ int CHDMIRxManager::HdmiRxEdidVerSwitch(int verValue)
         devFd = -1;
     }
 
-    HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
+    //HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
     return ret;
 }
 
@@ -242,82 +240,3 @@ int CHDMIRxManager::UpdataEdidDataWithPort(int port, unsigned char *dataBuf)
     return ret;
 }
 
-int CHDMIRxManager::HdmiEnableSPDFifo(bool enable)
-{
-    unsigned int pkttype = 0x83;
-    int ret = -1;
-
-    if (enable) {
-        ret = HDMIRxDeviceIOCtl(HDMI_IOC_PD_FIFO_PKTTYPE_EN, &pkttype);
-    } else {
-        ret = HDMIRxDeviceIOCtl(HDMI_IOC_PD_FIFO_PKTTYPE_DIS, &pkttype);
-    }
-    return ret;
-}
-
-int CHDMIRxManager::HdmiRxGetSPDInfoframe(struct spd_infoframe_st* spd)
-{
-    int ret = -1;
-    struct pd_infoframe_s pd;
-
-    pd.HB = 0x83;
-    ret = HDMIRxDeviceIOCtl(HDMI_IOC_GET_PD_FIFO_PARAM, &pd);
-    if (ret < 0) {
-        LOGE("Get SPD infoframe via ioctl failed: %s.\n", strerror(errno));
-    } else {
-        memcpy(spd, &pd, sizeof(struct spd_infoframe_st));
-    }
-
-    return ret;
-}
-
-void CHDMIRxManager::SetHDMIFeatureInit(int allmEnable, int VrrEnable)
-{
-    char buf[8] = {0};
-    sprintf(buf, "%d", allmEnable);
-    tvWriteSysfs(HDMI_SET_ALLM_PARAM, buf);
-    sprintf(buf, "%d", VrrEnable);
-    tvWriteSysfs(HDMI_VRR_ENABLED, buf);
-}
-
-int CHDMIRxManager::SetAllmEnabled(int enable)
-{
-    int ret = -1;
-    char buf[8] = {0};
-    sprintf(buf, "%d", enable);
-    tvWriteSysfs(HDMI_SET_ALLM_PARAM, buf);
-    ret = HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
-    return ret;
-}
-
-int CHDMIRxManager::GetAllmEnabled()
-{
-    char buf[32] = {0};
-    tvReadSysfs(HDMI_SET_ALLM_PARAM, buf);
-    int num;
-    if (sscanf(buf, "%*[^:]:%d", &num) == 1) {
-        return num > 0;
-    }
-    return 0;
-}
-
-int CHDMIRxManager::SetVrrEnabled(int enable)
-{
-    int ret = -1;
-    char buf[8] = {0};
-    sprintf(buf, "%d", enable);
-    tvWriteSysfs(HDMI_VRR_ENABLED, buf);
-    ret = HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
-    return ret;
-}
-
-int CHDMIRxManager::GetVrrEnabled()
-{
-    char buf[32] = {0};
-    tvReadSysfs(HDMI_VRR_ENABLED, buf);
-    int num;
-    if (sscanf(buf, "%*[^:]:%d", &num) == 1) {
-        return num > 0;
-    }
-    return 0;
-}

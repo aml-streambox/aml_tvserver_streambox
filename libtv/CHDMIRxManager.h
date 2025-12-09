@@ -10,21 +10,27 @@
 #ifndef _C_HDMI_RX_MANAGER_H_
 #define _C_HDMI_RX_MANAGER_H_
 
-#include <linux/amlogic/hdmi_rx.h>
+
+#define HDMI_IOC_MAGIC 'H'
+#define HDMI_IOC_HDCP_ON	        _IO(HDMI_IOC_MAGIC, 0x01)
+#define HDMI_IOC_HDCP_OFF	        _IO(HDMI_IOC_MAGIC, 0x02)
+#define HDMI_IOC_EDID_UPDATE	    _IO(HDMI_IOC_MAGIC, 0x03)
+#define HDMI_IOC_PC_MODE_ON	        _IO(HDMI_IOC_MAGIC, 0x04)
+#define HDMI_IOC_PC_MODE_OFF	    _IO(HDMI_IOC_MAGIC, 0x05)
+#define HDMI_IOC_HDCP22_AUTO	    _IO(HDMI_IOC_MAGIC, 0x06)
+#define HDMI_IOC_HDCP22_FORCE14     _IO(HDMI_IOC_MAGIC, 0x07)
+#define HDMI_IOC_HDCP_GET_KSV       _IOR(HDMI_IOC_MAGIC, 0x09, struct _hdcp_ksv)
+
 
 #define CS_HDMIRX_DEV_PATH                "/dev/hdmirx0"
 #define HDMI_CEC_PORT_SEQUENCE            "/sys/class/cec/port_seq"
-#define HDMI_CEC_PORT_MAP                 "/sys/module/aml_media/parameters/port_map"//for kernel 5.4 & later
+#define HDMI_CEC_PORT_MAP                 "/sys/module/tvin_hdmirx/parameters/port_map"
 #define HDMI_EDID_DEV_PATH                "/sys/class/hdmirx/hdmirx0/edid"
 #define HDMI_EDID_VERSION_DEV_PATH        "/sys/class/hdmirx/hdmirx0/edid_select"
 #define HDMI_EDID_DATA_DEV_PATH           "/sys/class/hdmirx/hdmirx0/edid_with_port"
-#define HDMI_SET_ALLM_PARAM               "/sys/class/hdmirx/hdmirx0/allm_func_ctrl"
-#define HDMI_VRR_ENABLED                  "/sys/class/hdmirx/hdmirx0/vrr_func_ctrl"
+
 
 #define REAL_EDID_DATA_SIZE        (256)
-
-#define  HDMI_UBOOT_EDID_VERSION          "hdmi.edid.version"
-#define  HDMI_UBOOT_EDID_FEATURE          "hdmi.edid.feature"
 
 typedef enum tv_hdmi_hdcp_version_e {
     HDMI_HDCP_VER_14 = 0,
@@ -43,6 +49,11 @@ typedef enum tv_hdmi_hdcpkey_enable_e {
     hdcpkey_disable ,
 } tv_hdmi_hdcpkey_enable_t;
 
+typedef struct _hdcp_ksv {
+    int bksv0;
+    int bksv1;
+} _hdcp_ksv;
+
 class CHDMIRxManager {
 public:
     CHDMIRxManager();
@@ -58,13 +69,6 @@ public:
     int CalHdmiPortCecPhysicAddr(void);
     int SetHdmiPortCecPhysicAddr(void);
     int UpdataEdidDataWithPort(int port, unsigned char *dataBuf);
-    int HdmiEnableSPDFifo(bool enable);
-    int HdmiRxGetSPDInfoframe(struct spd_infoframe_st* spd);
-    void SetHDMIFeatureInit(int allmEnable, int VrrEnable);
-    int SetAllmEnabled(int enable);
-    int GetAllmEnabled();
-    int SetVrrEnabled(int enable);
-    int GetVrrEnabled();
 private:
     int mHdmiRxDeviceId;
 };

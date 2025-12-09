@@ -12,13 +12,13 @@
 #include "CTvEvent.h"
 #include "CHDMIRxManager.h"
 #include "CAmVideo.h"
-#include "CMsgQueue.h"
 
 #ifdef HAVE_AUDIO
 #include "CTvAudio.h"
 #endif
 
-#define CONFIG_FILE_PATH_DEF               "/vendor/etc/tvconfig/tvconfig.conf"
+#define CONFIG_FILE_PATH_DEF               "/etc/tvconfig/tvconfig.conf"
+#define CONFIG_EDID_FILE_PATH_DEF          "/etc/tvconfig/hdmi"
 
 #define DOLBY_VISION_TV_KO_PATH            "/vendor/lib/modules/dovi_tv.ko"
 #define DOLBY_VISION_STB_KO_PATH           "/vendor/lib/modules/dovi.ko"
@@ -28,6 +28,7 @@
 #define VIDEO_SYNC_MODE     "/sys/class/tsync/mode"
 //0 means do AV sync, 1 means don't do AV sync,just free run.
 #define VIDEO_FREERUN_MODE    "/sys/class/video/freerun_mode"
+
 class CTv : public CTvDevicesPollDetect::ISourceConnectObserver {
 public:
     class TvIObserver {
@@ -56,20 +57,8 @@ public:
     bool needSnowEffect();
     int SetSnowShowEnable(bool enable);
     int GetSourceConnectStatus(tv_source_input_t source);
-    int GetHdmiSPDInfo(tv_source_input_t source, char* data, size_t datalen);
-    int SetEdidBoostOn(int bBoostOn);
-    virtual void onSigDvAllmChange();
-    virtual void onSigVrrChange();
     virtual void onSourceConnect(int source, int connect_status);
     virtual void onVdinSignalChange();
-    int GetPanelSize();
-    bool GetDolbyVisionSupportStatus(void);
-    void GetAllmInfo(tvin_latency_s *info);
-    int GetVrrMode();
-    int SetHdmiAllmEnabled(int enable);
-    int GetHdmiAllmEnabled();
-    int SetHdmiVrrEnabled(int enable);
-    int GetHdmiVrrEnabled();
 
 private:
     void onSigStatusChange(void);
@@ -78,11 +67,9 @@ private:
     void onSigToUnSupport();
     void onSigToNoSig();
     int sendTvEvent(CTvEvent &event);
-    void isVideoFrameAvailable(unsigned int u32NewFrameCount);
 #ifdef HAVE_AUDIO
     int mapSourcetoAudiotupe(tv_source_input_t dest_source);
 #endif
-    void muteVideoOnHDMISource();
 
     volatile int mLastScreenMode;
 
@@ -94,22 +81,5 @@ private:
     CTvDevicesPollDetect mTvDevicesPollDetect;
     TvIObserver *mpObserver;
     vdin_work_mode_t mVdinWorkMode = VDIN_WORK_MODE_VFM;
-    int mPanelSize = 0;
-    int mBoostOn = 0;
-    int mDolbyVisionEnableState = 0;
     bool mATVDisplaySnow;
-
-protected:
-    class CTvMsgQueue: public CMsgQueueThread {
-    public:
-        static const int TV_MSG_ENABLE_VIDEO_LATER = 9;
-        CTvMsgQueue(CTv *tv);
-        ~CTvMsgQueue();
-    private:
-        virtual void handleMessage ( CMessage &msg );
-        CTv *mpTv;
-    };
-
-    CTvMsgQueue *mTvMsgQueue;
-
 };

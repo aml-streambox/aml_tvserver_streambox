@@ -6,7 +6,7 @@
  *
  * Description: c++ file
  */
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CTvAudio"
 
 #include <stdlib.h>
@@ -101,24 +101,3 @@ void CTvAudio::release_audio_patch()
         }
     }
 }
-
-void CTvAudio::set_audio_av_mute(bool mute)
-{
-    if (iSInit) {
-        int ret;
-        char parm[64] = {0};
-        if (mute) {
-            sprintf(parm, "parental_control_av_mute=%s","true");
-        } else {
-            sprintf(parm, "parental_control_av_mute=%s","false");
-        }
-        LOGD("%s:set %s\n", __FUNCTION__, parm);
-        ret = device->set_parameters(device, parm);
-        if (ret) {
-            LOGE("%s:fail ret:%d\n",__FUNCTION__,ret);
-        } else {
-            LOGD("%s:success\n",__FUNCTION__);
-        }
-    }
-}
-

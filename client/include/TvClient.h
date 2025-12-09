@@ -24,7 +24,7 @@ using namespace android;
 extern "C" {
 #endif
 
-class TvClient : public BBinder, public IBinder::DeathRecipient {
+class TvClient : public BBinder{
 public:
     class TvClientIObserver {
     public:
@@ -32,13 +32,6 @@ public:
         virtual ~TvClientIObserver() {};
         virtual void onTvClientEvent(CTvEvent &event) = 0;
     };
-
-    class DeathNotifier: public IBinder::DeathRecipient {
-    public:
-        DeathNotifier() {}
-        virtual void binderDied(const wp<IBinder> &who);
-    };
-    static sp<DeathNotifier> mDeathNotifier;
 
     enum {
         CMD_START = IBinder::FIRST_CALL_TRANSACTION,
@@ -49,15 +42,10 @@ public:
         EVT_SIG_DT_CB = IBinder::FIRST_CALL_TRANSACTION + 5,
         DATA_SET_ACTION = IBinder::FIRST_CALL_TRANSACTION + 6,
         DATA_GET_ACTION = IBinder::FIRST_CALL_TRANSACTION + 7,
-        CMD_DATA_REQ  = IBinder::FIRST_CALL_TRANSACTION + 8,
-        EVT_SIG_DV_ALLM = IBinder::FIRST_CALL_TRANSACTION + 9,
-        CMT_GET_ALLM_INFO = IBinder::FIRST_CALL_TRANSACTION + 10,
-        EVT_SIG_VRR_CB = IBinder::FIRST_CALL_TRANSACTION + 11,
     };
 
     TvClient();
     ~TvClient();
-    void Release();
     static TvClient *GetInstance();
     int setTvClientObserver(TvClientIObserver *observer);
     int StartTv(tv_source_input_t source);
@@ -74,29 +62,15 @@ public:
     tvin_aspect_ratio_t GetCurrentSourceAspectRatio();
     tvin_color_fmt_t GetCurrentSourceColorFormat();
     tvin_color_range_t GetCurrentSourceColorRange();
-    int SetCurrentSourceColorRange(tvin_color_range_t range_mode);
     tvin_line_scan_mode_t GetCurrentSourceLineScanMode();
     int GetSourceConnectStatus(tv_source_input_t source);
-    int GetSPDInfo(tv_source_input_t source, char* dataBuf, size_t datalen);
-    int SetEdidBoostOn(int bBoostOn);
-    int GetCurrentSourceAllmInfo(tvin_latency_s *info);
-    int SetHdmiAllmEnabled(bool enable);
-    bool GetHdmiAllmEnabled();
-    int SetHdmiVrrEnabled(bool enable);
-    bool GetHdmiVrrEnabled();
-    vdin_vrr_mode_t GetHdmiVrrMode();
-
 private:
     int SendMethodCall(char *CmdString);
-    int SendDataRequest(char *CmdString, char *data, size_t datalen);
     static int HandSourceConnectEvent(const void *param);
     static int HandSignalDetectEvent(const void *param);
-    static int HandSignalDvAllmEvent(const void *param);
-    static int HandSignalVrrEvent(const void *param);
     int SendTvClientEvent(CTvEvent &event);
-    virtual void binderDied(const wp<IBinder> &who);
 
-    static sp<TvClient> mInstance;
+    static TvClient *mInstance;
     std::map<int, TvClientIObserver *> mTvClientObserver;
 
     sp<IBinder> tvServicebinder;

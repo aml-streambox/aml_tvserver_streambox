@@ -6,7 +6,7 @@
  *
  * Description:
  */
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "TvClient"
 
 #include <stdio.h>
@@ -29,19 +29,16 @@ const int EVENT_SOURCE_CONNECT = 10;
 
 pthread_mutex_t tvclient_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-sp<TvClient> TvClient::mInstance;
-sp<TvClient::DeathNotifier> TvClient::mDeathNotifier;
-
+TvClient *TvClient::mInstance;
 TvClient *TvClient::GetInstance() {
-    if (mInstance.get() == nullptr) {
+    if (mInstance == NULL) {
         mInstance = new TvClient();
     }
 
-    return mInstance.get();
+    return mInstance;
 }
 
 TvClient::TvClient() {
-    init_tv_logging();
     LOGD("%s.\n", __FUNCTION__);
     pthread_mutex_lock(&tvclient_mutex);
     sp<ProcessState> proc(ProcessState::self());
@@ -54,37 +51,23 @@ TvClient::TvClient() {
         LOGD("TvClient: Waiting tvservice published.\n");
         usleep(500000);
     } while(true);
-    if (mDeathNotifier == NULL) {
-       mDeathNotifier = new DeathNotifier();
-    }
-    tvServicebinder->linkToDeath(mDeathNotifier);
     LOGD("Connected to tvservice.\n");
     send.writeStrongBinder(sp<IBinder>(this));
     tvServicebinder->transact(CMD_SET_TV_CB, send, &reply);
     tvServicebinderId = reply.readInt32();
-    LOGD("tvServicebinderId:%d.\n",tvServicebinderId);
     pthread_mutex_unlock(&tvclient_mutex);
 }
 
 TvClient::~TvClient() {
-    LOGD("%s.\n", __FUNCTION__);
-    mInstance = nullptr;
-    mDeathNotifier = nullptr;
-}
-
-void TvClient::Release() {
     LOGD("%s.\n", __FUNCTION__);
     pthread_mutex_lock(&tvclient_mutex);
     if (tvServicebinder != NULL) {
         Parcel send, reply;
         send.writeInt32(tvServicebinderId);
         tvServicebinder->transact(CMD_CLR_TV_CB, send, &reply);
-        tvServicebinder = NULL;
     }
+    tvServicebinder = NULL;
     pthread_mutex_unlock(&tvclient_mutex);
-    IPCThreadState::self()->stopProcess();
-    mInstance = nullptr;
-    mDeathNotifier = nullptr;
 }
 
 int TvClient::SendMethodCall(char *CmdString)
@@ -96,37 +79,15 @@ int TvClient::SendMethodCall(char *CmdString)
     if (tvServicebinder != NULL) {
         send.writeCString(CmdString);
         if (tvServicebinder->transact(CMD_TV_ACTION, send, &reply) != 0) {
-        ReturnVal = reply.readExceptionCode();
-        LOGE("%s: tvServicebinder failed, error code:%d\n", __FUNCTION__, ReturnVal);
+            LOGE("%s: tvServicebinder failed.\n", __FUNCTION__);
+            ReturnVal = -1;
         } else {
-        ReturnVal = reply.readInt32();
+            ReturnVal = reply.readInt32();
         }
     } else {
         LOGE("%s: tvServicebinder is NULL.\n", __FUNCTION__);
     }
     return ReturnVal;
-}
-
-int TvClient::SendDataRequest(char *CmdString, char *data, size_t datalen)
-{
-    LOGD("%s.\n", __FUNCTION__);
-    int ReturnVal = 0;
-    Parcel send, reply;
-
-    pthread_mutex_lock(&tvclient_mutex);
-    if (tvServicebinder != NULL) {
-        send.writeCString(CmdString);
-        if (tvServicebinder->transact(CMD_DATA_REQ, send, &reply) != 0) {
-            LOGE("TvClient: call %s failed.\n", CmdString);
-            ReturnVal = -1;
-        } else {
-            ReturnVal = reply.readInt32();
-            if (reply.read(data, datalen) != 0)
-                ReturnVal = -1;
-        }
-    }
-    pthread_mutex_unlock(&tvclient_mutex);
-   return ReturnVal;
 }
 
 int TvClient::SendTvClientEvent(CTvEvent &event)
@@ -168,34 +129,10 @@ int TvClient::HandSignalDetectEvent(const void* param)
     event.mTrans_fmt = parcel->readInt32();
     event.mStatus = parcel->readInt32();
     event.mDviFlag = parcel->readInt32();
-    event.mhdr_info = parcel->readUint32();
     mInstance->SendTvClientEvent(event);
 
     return 0;
 
-}
-
-int TvClient::HandSignalDvAllmEvent(const void* param)
-{
-    Parcel *parcel = (Parcel*) param;
-    TvEvent::SignalDvAllmEvent event;
-
-    event.allm_mode = parcel->readInt32();
-    event.it_content = parcel->readInt32();
-    event.cn_type = parcel->readInt32();
-    mInstance->SendTvClientEvent(event);
-
-    return 0;
-}
-
-int TvClient::HandSignalVrrEvent(const void* param)
-{
-    Parcel *parcel = (Parcel*) param;
-    TvEvent::SignalVrrEvent event;
-    event.cur_vrr_status = parcel->readInt32();
-    mInstance->SendTvClientEvent(event);
-
-    return 0;
 }
 
 int TvClient::setTvClientObserver(TvClientIObserver *observer)
@@ -294,36 +231,9 @@ int TvClient::SetEdidData(tv_source_input_t source, char *dataBuf)
 int TvClient::GetEdidData(tv_source_input_t source, char *dataBuf)
 {
     LOGD("%s\n", __FUNCTION__);
-    char buf[32] = {0};
-    sprintf(buf, "%d.%d", HDMI_EDID_DATA_GET, source);
-    int ret = -1;
-    Parcel send, reply;
-    if (tvServicebinder != NULL) {
-        send.writeCString(buf);
-        if (tvServicebinder->transact(DATA_GET_ACTION, send, &reply) != 0) {
-            LOGE("%s: tvServicebinder failed.\n", __FUNCTION__);
-        } else {
-            // dataSize
-            reply.readInt32();
-            for (int i=0;i<256;i++) {
-                dataBuf[i] = (char)reply.readInt32();
-            }
-            //ret = reply.readInt32();
-            ret = 0;
-        }
-    } else {
-        LOGE("%s: tvServicebinder is NULL.\n", __FUNCTION__);
-    }
-
-    return ret;
-}
-
-int TvClient::GetSPDInfo(tv_source_input_t source, char* dataBuf, size_t datalen)
-{
-    LOGD("%s\n", __FUNCTION__);
     char buf[512] = {0};
-    snprintf(buf, sizeof(buf), "pkttype.get.%d.%d.%d.%s", HDMI_SPD_INFO_GET, source, datalen, dataBuf);
-    return SendDataRequest(buf, dataBuf, datalen); // SendMethodCall(buf);
+    sprintf(buf, "edid.get.%d.%d.%s", HDMI_EDID_DATA_GET, source, dataBuf);
+    return SendMethodCall(buf);
 }
 
 int TvClient::GetCurrentSourceFrameHeight()
@@ -374,14 +284,6 @@ tvin_color_fmt_t TvClient::GetCurrentSourceColorFormat()
     return (tvin_color_fmt_t)SendMethodCall(buf);
 }
 
-int TvClient::SetCurrentSourceColorRange(tvin_color_range_t range_mode)
-{
-    LOGD("%s\n", __FUNCTION__);
-    char buf[32] = {0};
-    sprintf(buf, "hdmi.%d.%d", HDMI_SET_COLOR_RANGE, (int)range_mode);
-    return SendMethodCall(buf);
-}
-
 tvin_color_range_t TvClient::GetCurrentSourceColorRange()
 {
     LOGD("%s\n", __FUNCTION__);
@@ -406,84 +308,6 @@ int TvClient::GetSourceConnectStatus(tv_source_input_t source)
     return SendMethodCall(buf);
 }
 
-int TvClient::SetEdidBoostOn(int bBoostOn)
-{
-    LOGD("%s\n", __FUNCTION__);
-    char buf[32] = {0};
-    sprintf(buf, "control.%d.%d", TV_CONTROL_SET_BOOST_ON, bBoostOn);
-    return SendMethodCall(buf);
-}
-
-int TvClient::GetCurrentSourceAllmInfo(tvin_latency_s *info)
-{
-    LOGD("%s\n", __FUNCTION__);
-    int ret = 0;
-    char CmdString[32] = {0};
-    sprintf(CmdString, "control.%d.", TV_CONTROL_GET_ALLM_INFO);
-    Parcel send, reply;
-    if (tvServicebinder != NULL) {
-        send.writeCString(CmdString);
-        if (tvServicebinder->transact(CMT_GET_ALLM_INFO, send, &reply) != 0) {
-            LOGE("%s: tvServicebinder failed.\n", __FUNCTION__);
-            ret = -1;
-        } else {
-            info-> allm_mode  = reply.readInt32();
-            info->it_content  = reply.readInt32();
-            info->cn_type     = (tvin_cn_type_t)reply.readInt32();
-        }
-    } else {
-        LOGE("%s: tvServicebinder is NULL.\n", __FUNCTION__);
-        ret = -1;
-    }
-    return ret;
-}
-
-int TvClient::SetHdmiAllmEnabled(bool enable)
-{
-    LOGD("%s: %s\n", __FUNCTION__, enable?"enable":"disable");
-    char buf[32] = {0};
-    sprintf(buf, "hdmi.%d.%d", HDMI_SET_ALLM_ENABLED, enable?1:0);
-    return SendMethodCall(buf);
-}
-
-bool TvClient::GetHdmiAllmEnabled()
-{
-    LOGD("%s\n", __FUNCTION__);
-    char buf[32] = {0};
-    sprintf(buf, "hdmi.%d", HDMI_GET_ALLM_ENABLED);
-    if (SendMethodCall(buf)) {
-        return true;
-    }
-    return false;
-}
-
-int TvClient::SetHdmiVrrEnabled(bool enable)
-{
-    LOGD("%s: %s\n", __FUNCTION__, enable?"enable":"disable");
-    char buf[32] = {0};
-    sprintf(buf, "hdmi.%d.%d", HDMI_SET_VRR_ENABLED, enable?1:0);
-    return SendMethodCall(buf);
-}
-
-bool TvClient::GetHdmiVrrEnabled()
-{
-    LOGD("%s\n", __FUNCTION__);
-    char buf[32] = {0};
-    sprintf(buf, "hdmi.%d", HDMI_GET_VRR_ENABLED);
-    if (SendMethodCall(buf)) {
-        return true;
-    }
-    return false;
-}
-
-vdin_vrr_mode_t TvClient::GetHdmiVrrMode()
-{
-    LOGD("%s\n", __FUNCTION__);
-    char buf[32] = {0};
-    sprintf(buf, "hdmi.%d", HDMI_GET_VRR_MODE);
-    return (vdin_vrr_mode_t)SendMethodCall(buf);
-}
-
 status_t TvClient::onTransact(uint32_t code,
                                 const Parcel& data, Parcel* reply,
                                 uint32_t flags) {
@@ -498,14 +322,6 @@ status_t TvClient::onTransact(uint32_t code,
             HandSignalDetectEvent(&data);
             break;
         }
-        case EVT_SIG_DV_ALLM: {
-            HandSignalDvAllmEvent(&data);
-            break;
-        }
-        case EVT_SIG_VRR_CB: {
-            HandSignalVrrEvent(&data);
-            break;
-        }
         case CMD_START:
         default:
             pthread_mutex_unlock(&tvclient_mutex);
@@ -514,20 +330,3 @@ status_t TvClient::onTransact(uint32_t code,
     pthread_mutex_unlock(&tvclient_mutex);
     return (0);
 }
-
-void TvClient::binderDied(const wp<IBinder> &who)
-{
-    LOGV("ITv died");
-    //notifyCallback(1, 2, 0);
-}
-
-void TvClient::DeathNotifier::binderDied(const wp<IBinder> &who)
-{
-    LOGV("-----Tv server died,reconnect-----\n");
-    if (TvClient::mInstance != nullptr) {
-        TvClient::mInstance.clear();
-    }
-    mInstance = TvClient::GetInstance();
-    LOGV("-----reconnect success-----\n");
-}
-

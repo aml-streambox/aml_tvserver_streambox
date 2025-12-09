@@ -7,7 +7,7 @@
  * Description: c++ file
  */
 
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "tvutils"
 
 #include <unistd.h>
@@ -24,7 +24,6 @@
 #include <ctype.h>
 #include <sys/prctl.h>
 #include <stdlib.h>
-#include <ubootenv.h>
 
 #include "tvutils.h"
 
@@ -211,36 +210,5 @@ int SaveDataToFile(char *fileName, int offset, int nsize, char *dataBuf)
         }
     }
 
-    return ret;
-}
-
-void UenvInit(void)
-{
-    int ret = bootenv_init();
-    if (ret < 0) {
-    LOGD("%s: init uenv failed, ret = %d\n", __FUNCTION__, ret);
-    }
-}
-
-const char* GetUenv(const char *key)
-{
-    const char *buf = bootenv_get(key);
-    if (buf) {
-        LOGD("%s: (%s = %s)\n", __FUNCTION__, key, buf);
-    } else {
-        LOGD("%s: Can not read uboot env \"%s\".", __FUNCTION__, key);
-    }
-    return buf;
-}
-
-int SetUenv (const char *name, const char *value)
-{
-    int ret = -1;
-    ret = bootenv_update(name, value);
-    if (ret < 0) {
-        LOGD("%s: (%s = %s) failed!", __FUNCTION__, name, value);
-    } else {
-        LOGD("%s: (%s = %s) success!", __FUNCTION__, name, value);
-        }
     return ret;
 }

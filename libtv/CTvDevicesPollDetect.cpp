@@ -7,7 +7,7 @@
  * Description: c++ file
  */
 
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CTvDevicesPollDetect"
 
 #include <stdio.h>
@@ -97,10 +97,12 @@ const char* CTvDevicesPollDetect::inputToName(tv_source_input_t srcInput) {
         "HDMI4",
         "VGA,",
         "MPEG",
+        "DTV",
         "SVIDEO",
         "IPTV",
         "DUMMY",
         "SPDIF",
+        "ADTV",
         "MAX"
     };
 

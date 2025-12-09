@@ -7,7 +7,7 @@
  * Description: c++ file
  */
 
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "CTvin"
 
 #include <stdio.h>
@@ -145,7 +145,7 @@ int CTvin::VDIN_StopDec()
     return ret;
 }
 
-int CTvin::VDIN_GetSignalEventInfo(vdin_event_info_s *SignalEventInfo)
+int CTvin::VDIN_GetSignalEventInfo(struct vdin_event_info_s *SignalEventInfo)
 {
     int ret = VDIN_DeviceIOCtl(TVIN_IOC_G_EVENT_INFO, SignalEventInfo);
     if (ret < 0) {
@@ -161,21 +161,6 @@ int CTvin::VDIN_GetSignalInfo ( struct tvin_info_s *SignalInfo )
     if ( ret < 0 ) {
         LOGE("%s failed, error(%s).\n", __FUNCTION__, strerror ( errno ));
     }
-    return ret;
-}
-
-int CTvin::VDIN_GetAllmInfo(tvin_latency_s *AllmInfo)
-{
-    int ret = -1;
-    if (AllmInfo == NULL) {
-        LOGE("%s: param is NULL;\n", __FUNCTION__);
-    } else {
-        ret = VDIN_DeviceIOCtl(TVIN_IOC_GET_LATENCY_MODE, AllmInfo);
-        if (ret < 0) {
-            LOGE("%s: ioctl failed!\n", __FUNCTION__);
-        }
-    }
-
     return ret;
 }
 
@@ -311,6 +296,9 @@ tv_source_input_type_t CTvin::Tvin_SourceInputToSourceInputType ( tv_source_inpu
         case SOURCE_HDMI4:
             ret = SOURCE_TYPE_HDMI;
             break;
+        case SOURCE_DTV:
+            ret = SOURCE_TYPE_DTV;
+            break;
         case SOURCE_IPTV:
             ret = SOURCE_TYPE_IPTV;
             break;
@@ -353,6 +341,9 @@ tvin_port_t CTvin::Tvin_GetSourcePortBySourceType ( tv_source_input_type_t sourc
             break;
         case SOURCE_TYPE_IPTV:
             source_input = SOURCE_IPTV;
+            break;
+        case SOURCE_TYPE_DTV:
+            source_input = SOURCE_DTV;
             break;
         case SOURCE_TYPE_SPDIF:
             source_input = SOURCE_SPDIF;
@@ -419,59 +410,6 @@ tvin_port_id_t CTvin::Tvin_GetHdmiPortIdBySourceInput(tv_source_input_t source_i
     return portId;
 }
 
-tvin_port_t CTvin::Tvin_GetVdinPortByVdinPortID(tvin_port_id_t portId)
-{
-    tvin_port_t portValue = TVIN_PORT_NULL;
-    switch (portId) {
-    case TVIN_PORT_ID_1:
-        portValue = TVIN_PORT_HDMI0;
-        break;
-    case TVIN_PORT_ID_2:
-        portValue =TVIN_PORT_HDMI1;
-        break;
-    case TVIN_PORT_ID_3:
-        portValue = TVIN_PORT_HDMI2;
-        break;
-    case  TVIN_PORT_ID_4 :
-        portValue = TVIN_PORT_HDMI3;
-        break;
-    default:
-        portValue = TVIN_PORT_NULL;
-        break;
-    }
-    LOGD("%s: portId: %d, portValue: 0x%x.\n", __FUNCTION__, portId, portValue);
-    return portValue;
-}
-
-ui_hdmi_port_id_t CTvin::Tvin_GetUIHdmiPortIdBySourceInput(tv_source_input_t source_input)
-{
-    ui_hdmi_port_id_t portId = UI_HDMI_PORT_ID_MAX;
-    if ((source_input > SOURCE_HDMI4) || (source_input < SOURCE_HDMI1)) {
-        LOGD("%s: not HDMI Source.\n", __FUNCTION__);
-    } else {
-        switch (source_input) {
-        case SOURCE_HDMI1:
-            portId = UI_HDMI_PORT_ID_1;
-            break;
-        case SOURCE_HDMI2:
-            portId = UI_HDMI_PORT_ID_2;
-            break;
-        case SOURCE_HDMI3:
-            portId = UI_HDMI_PORT_ID_3;
-            break;
-        case SOURCE_HDMI4:
-            portId = UI_HDMI_PORT_ID_4;
-            break;
-        default:
-            portId = UI_HDMI_PORT_ID_MAX;
-            break;
-        }
-    }
-
-    LOGD("%s: source: %d, UIHDMIportId: %d.\n", __FUNCTION__, source_input, portId);
-    return portId;
-}
-
 int CTvin::Tvin_GetFrontendInfo(tvin_frontend_info_t *frontendInfo)
 {
     int ret = -1;
@@ -488,8 +426,7 @@ int CTvin::Tvin_GetFrontendInfo(tvin_frontend_info_t *frontendInfo)
 }
 
 int CTvin::Tvin_SetColorRangeMode(tvin_color_range_t range_mode)
-
-{
+{
     return VDIN_SetColorRangeMode(range_mode);
 }
 
@@ -508,6 +445,12 @@ unsigned int CTvin::Tvin_TransPortStringToValue(const char *port_str)
         return TVIN_PORT_CVBS2;
     } else if (strcasecmp(port_str, "TVIN_PORT_CVBS3") == 0) {
         return TVIN_PORT_CVBS3;
+    } else if (strcasecmp(port_str, "TVIN_PORT_COMP0") == 0) {
+        return TVIN_PORT_COMP0;
+    } else if (strcasecmp(port_str, "TVIN_PORT_COMP1") == 0) {
+        return TVIN_PORT_COMP1;
+    } else if (strcasecmp(port_str, "TVIN_PORT_VGA0") == 0) {
+        return TVIN_PORT_VGA0;
     } else if (strcasecmp(port_str, "TVIN_PORT_HDMI0") == 0) {
         return TVIN_PORT_HDMI0;
     } else if (strcasecmp(port_str, "TVIN_PORT_HDMI1") == 0) {
@@ -545,6 +488,7 @@ void CTvin::Tvin_LoadSourceInputToPortMap()
     config_value = ConfigGetStr(CFG_SECTION_SRC_INPUT, CFG_TVCHANNEL_VGA, "TVIN_PORT_VGA0");
     mSourceInputToPortMap[SOURCE_VGA] = Tvin_TransPortStringToValue(config_value);
     mSourceInputToPortMap[SOURCE_MPEG] = TVIN_PORT_MPEG0;
+    mSourceInputToPortMap[SOURCE_DTV] = TVIN_PORT_DTV;
     mSourceInputToPortMap[SOURCE_IPTV] = TVIN_PORT_BT656;
     mSourceInputToPortMap[SOURCE_SPDIF] = TVIN_PORT_CVBS3;
 }
@@ -592,12 +536,12 @@ int CTvin::Tvin_SwitchSnow(bool enable)
     int ret = -1;
     if ( enable ) {
         LOGD("%s: set snow enable\n", __FUNCTION__ );
-        ret = AFE_DeviceIOCtl( TVIN_IOC_S_AFE_SNOW_ON );
-        ret = VDIN_DeviceIOCtl( TVIN_IOC_SNOW_ON );
+        ret = AFE_DeviceIOCtl( TVIN_IOC_S_AFE_SONWON );
+        ret = VDIN_DeviceIOCtl( TVIN_IOC_SNOWON );
     } else {
         LOGD("%s: set snow disable\n", __FUNCTION__ );
-        ret = AFE_DeviceIOCtl( TVIN_IOC_S_AFE_SNOW_OFF );
-        ret = VDIN_DeviceIOCtl( TVIN_IOC_SNOW_OFF );
+        ret = AFE_DeviceIOCtl( TVIN_IOC_S_AFE_SONWOFF );
+        ret = VDIN_DeviceIOCtl( TVIN_IOC_SNOWOFF );
     }
 
     return ret;
@@ -622,33 +566,6 @@ int CTvin::Tvin_GetSignalInfo(tvin_info_s *SignalInfo)
         LOGE("Tvin_GetSignalInfo: SignalInfo is NULL.\n");
     } else {
         ret = VDIN_GetSignalInfo(SignalInfo);
-    }
-
-    return ret;
-}
-
-int CTvin::Tvin_GetAllmInfo(tvin_latency_s *AllmInfo)
-{
-    int ret = -1;
-
-    if (AllmInfo == NULL)
-        LOGE("%s: param is NULL;\n", __FUNCTION__);
-    else
-        ret = VDIN_GetAllmInfo(AllmInfo);
-
-    return ret;
-}
-
-int CTvin::VDIN_GetVrrFreesyncParm(struct vdin_vrr_freesync_param_s *vrrparm)
-{
-    int ret = -1;
-    if (vrrparm == NULL) {
-        LOGE("%s: param is NULL\n", __FUNCTION__);
-    } else {
-        ret = VDIN_DeviceIOCtl(TVIN_IOC_G_VRR_STATUS, vrrparm);
-        if (ret < 0) {
-            LOGE("%s failed, error(%s)\n", __FUNCTION__, strerror(errno));
-        }
     }
 
     return ret;
@@ -679,8 +596,7 @@ int CTvin::VDIN_AddPath ( const char *videopath )
 }
 
 int CTvin::VDIN_RemovePath(tv_path_type_t pathtype)
-
-{
+{
     int ret = -1;
     switch (pathtype) {
         case TV_PATH_TYPE_DEFAULT:

@@ -11,7 +11,6 @@
 #define _TVCLIENT_WRAPPER_H_
 
 #include "TvCommon.h"
-#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,7 +43,6 @@ typedef enum event_type_e {
     TV_EVENT_TYPE_RRT,
     TV_EVENT_TYPE_EAS,
     TV_EVENT_TYPE_AUDIO_CB,
-    TV_EVENT_TYPE_SIG_DV_ALLM,
     TV_EVENT_TYPE_MAX,
 } event_type_t;
 
@@ -54,19 +52,12 @@ typedef struct {
     tvin_trans_fmt_t TransFmt;
     tvin_sig_status_t SignalStatus;
     int isDviSignal; //1 is dvi signal
-    unsigned int Hdrinfo;
 } SignalDetectCallback_t;
 
 typedef struct {
     tv_source_input_t SourceInput;
     int ConnectionState; //1 is connect
 } SourceConnectCallback_t;
-
-typedef struct {
-    int allm_mode;
-    int it_content;
-    tvin_cn_type_t cn_type;
-} SignalDvAllmCallback_t;
 
 typedef void (*EventCallback)(event_type_t eventType, void *eventData);
 EventCallback mEventCallback;
@@ -80,7 +71,6 @@ extern int SetEdidVersion(struct TvClientWrapper_t *pTvClientWrappere, tv_source
 extern int GetEdidVersion(struct TvClientWrapper_t *pTvClientWrappere, tv_source_input_t source);
 extern int SetEdidData(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source, char *dataBuf);
 extern int GetEdidData(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source,char *dataBuf);
-extern int GetHdmiSPDInfo(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source, char* data, size_t datalen);
 extern int setTvEventCallback(EventCallback Callback);
 extern int SetVdinWorkMode(struct TvClientWrapper_t *pTvClientWrapper, vdin_work_mode_t vdinWorkMode);
 extern int GetCurrentSourceFrameHeight(struct TvClientWrapper_t *pTvClientWrapper);
@@ -92,7 +82,6 @@ extern tvin_color_fmt_t GetCurrentSourceColorFormat(struct TvClientWrapper_t *pT
 extern tvin_color_range_t GetCurrentSourceColorRange(struct TvClientWrapper_t *pTvClientWrapper);
 extern tvin_line_scan_mode_t GetCurrentSourceLineScanMode(struct TvClientWrapper_t *pTvClientWrapper);
 extern int GetSourceConnectStatus(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source);
-extern int SetEdidBoostOn(struct TvClientWrapper_t *pTvClientWrapper, int bBoostOn);
 #ifdef __cplusplus
 };
 #endif

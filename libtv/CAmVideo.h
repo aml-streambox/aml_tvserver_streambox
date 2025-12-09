@@ -9,10 +9,8 @@
 #ifndef _CAM_VIDEO_H
 #define _CAM_VIDEO_H
 
-#include <linux/amlogic/amvideo.h>
-
 #define AM_VIDEO_PATH           "/dev/amvideo"
-#define PATH_FRAME_COUNT_54     "/sys/module/aml_media/parameters/new_frame_count"
+
 // ***************************************************************************
 // ********************* enum type definition ********************************
 // ***************************************************************************
@@ -37,6 +35,18 @@ typedef enum video_global_output_mode_e {
 // ***************************************************************************
 // ********************* IOCTL command definition ****************************
 // ***************************************************************************
+#define AMSTREAM_IOC_MAGIC  'S'
+#define AMSTREAM_IOC_GLOBAL_GET_VIDEO_OUTPUT    _IOR(AMSTREAM_IOC_MAGIC, 0x21, int)
+#define AMSTREAM_IOC_GLOBAL_SET_VIDEO_OUTPUT    _IOW(AMSTREAM_IOC_MAGIC, 0x22, int)
+#define AMSTREAM_IOC_GET_VIDEO_DISABLE_MODE     _IOR(AMSTREAM_IOC_MAGIC, 0x48, int)
+#define AMSTREAM_IOC_SET_VIDEO_DISABLE_MODE     _IOW(AMSTREAM_IOC_MAGIC, 0x49, int)
+#define AMSTREAM_IOC_GET_OMX_INFO               _IOR(AMSTREAM_IOC_MAGIC, 0xb2, unsigned int)
+#define AMSTREAM_IOC_GLOBAL_GET_VIDEOPIP_OUTPUT _IOR(AMSTREAM_IOC_MAGIC, 0x2b, int)
+#define AMSTREAM_IOC_GLOBAL_SET_VIDEOPIP_OUTPUT _IOW(AMSTREAM_IOC_MAGIC, 0x2c, int)
+#define AMSTREAM_IOC_GET_VIDEOPIP_DISABLE       _IOR(AMSTREAM_IOC_MAGIC, 0x2d, int)
+#define AMSTREAM_IOC_SET_VIDEOPIP_DISABLE       _IOW(AMSTREAM_IOC_MAGIC, 0x2e, int)
+#define AMSTREAM_IOC_SET_ZORDER                 _IOW(AMSTREAM_IOC_MAGIC, 0x38, unsigned int)
+#define AMSTREAM_IOC_SET_PIP_ZORDER             _IOW(AMSTREAM_IOC_MAGIC, 0x36, unsigned int)
 
 class CAmVideo {
 public:
@@ -46,7 +56,6 @@ public:
     int GetVideoLayerStatus(int *status);
     int SetVideoGlobalOutputMode(int mode);
     int GetVideoGlobalOutputMode(int *mode);
-    int GetVideoFrameCount();
 private:
     int AmVideoOpenMoudle(void);
     int AmVideoCloseMoudle(void);

@@ -16,12 +16,6 @@
 #define VIDEO_DISABLE_VIDEO "/sys/class/video/disable_video"
 #define VIDEO_SCREEN_MODE   "/sys/class/video/screen_mode"
 #define VIDEO_TEST_SCREEN   "/sys/class/video/test_screen"
-#define VIDEO_AXIS_MODE     "/sys/class/video/axis"
-
-
-#define VIDEO_AXIS_FULL     "0 0 0 0"
-
-typedef enum tvin_sg_chg_flg tvin_sig_change_flag_t;
 
 typedef enum video_layer_color_e{
     VIDEO_LAYER_COLOR_BLACK   = 0,
@@ -40,7 +34,6 @@ public:
     int setVideoColor (int vdin_blending_mask, int y, int u, int v );
     int setVideoScreenMode ( int value );
     int getVideoScreenMode();
-    int setVideoaxis();
 
     static CVpp *getInstance();
 private:

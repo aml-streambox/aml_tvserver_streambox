@@ -6,7 +6,7 @@
  *
  * Description:
  */
-#define LOG_MODULE_TAG "TV"
+#define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "TvTest-cpp"
 
 #include <syslog.h>
@@ -53,40 +53,39 @@ public:
 
     ~TvTest()
     {
-      mpTvClient->Release();
+
     }
     void onTvClientEvent(CTvEvent &event)
     {
         int eventType = event.getEventType();
-        printf("%s: eventType: %d.\n", __FUNCTION__, eventType);
+        LOGD("%s: eventType: %d.\n", __FUNCTION__, eventType);
         switch (eventType) {
         case CTvEvent::TV_EVENT_SIGLE_DETECT: {
             TvEvent::SignalDetectEvent *signalDetectEvent = (TvEvent::SignalDetectEvent *)(&event);
-            printf("%s: source: %d, signalFmt: %d, transFmt: %d, status: %d, isDVI: %d, Hdrinfo: %ud.\n", __FUNCTION__,
+            LOGD("%s: source: %d, signalFmt: %d, transFmt: %d, status: %d, isDVI: %d.\n", __FUNCTION__,
                                                        signalDetectEvent->mSourceInput,
                                                        signalDetectEvent->mFmt,
                                                        signalDetectEvent->mTrans_fmt,
                                                        signalDetectEvent->mStatus,
-                                                       signalDetectEvent->mDviFlag,
-                                                       signalDetectEvent->mhdr_info);
+                                                       signalDetectEvent->mDviFlag);
             WriteSysfs("/sys/class/video/disable_video", 0);
             break;
             }
         case CTvEvent::TV_EVENT_SOURCE_CONNECT: {
             TvEvent::SourceConnectEvent *sourceConnectEvent = (TvEvent::SourceConnectEvent *)(&event);
-            printf("%s: source: %d, connectStatus: %d\n", __FUNCTION__,
+            LOGD("%s: source: %d, connectStatus: %d\n", __FUNCTION__,
                       sourceConnectEvent->mSourceInput, sourceConnectEvent->connectionState);
             break;
             }
         default:
-            printf("invalid event!\n", __FUNCTION__);
+            LOGD("invalid event!\n", __FUNCTION__);
             break;
         }
         return;
     }
 
     int SendCmd(const char *data) {
-        printf("%s: cmd is %s.\n", __FUNCTION__, data);
+        LOGD("%s: cmd is %s.\n", __FUNCTION__, data);
         if (strcmp(data, "start") == 0) {
             mpTvClient->StartTv(CurrentSource);
         } else if (strcmp(data, "stop") == 0) {
@@ -125,17 +124,17 @@ int main(int argc, char **argv) {
     test->CurrentSource=SOURCE_HDMI1;
     test->EdidVer=14;
 
-    printf("#### please select cmd####\n");
-    printf("#### select 1 to hdmi 1 ####\n");
-    printf("#### select 2 to hdmi 2 ####\n");
-    printf("#### select 3 to hdmi 3 ####\n");
-    printf("#### select 4 to edid 1.4 (this is default) ####\n");
-    printf("#### select 5 to edid 2.0 ####\n");
-    printf("#### select 6 to edid auto ####\n");
-    printf("#### select 7 to AV1 ####\n");
-    printf("#### select 8 to AV2 ####\n");
-    printf("#### select q to stop####\n");
-    printf("##########################\n");
+    LOGD("#### please select cmd####\n");
+    LOGD("#### select 1 to hdmi 1 ####\n");
+    LOGD("#### select 2 to hdmi 2 ####\n");
+    LOGD("#### select 3 to hdmi 3 ####\n");
+    LOGD("#### select 4 to edid 1.4 (this is default) ####\n");
+    LOGD("#### select 5 to edid 2.0 ####\n");
+    LOGD("#### select 6 to edid auto ####\n");
+    LOGD("#### select 7 to AV1 ####\n");
+    LOGD("#### select 8 to AV2 ####\n");
+    LOGD("#### select q to stop####\n");
+    LOGD("##########################\n");
     while (run) {
         scanf("%s", Command);
         switch (Command[0]) {
@@ -180,7 +179,6 @@ int main(int argc, char **argv) {
               test->EdidVer = 2;
               test->SendCmd("EDID_set");
               break;
-          }
           case '7': {
               test->SendCmd("stop");
               SetOsdBlankStatus("/sys/class/graphics/fb0/blank", 0);
@@ -202,8 +200,6 @@ int main(int argc, char **argv) {
         }
         fflush (stdout);
     }
-
-    delete test;
 
     return 0;
 }
