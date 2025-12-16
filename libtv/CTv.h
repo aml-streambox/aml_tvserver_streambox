@@ -17,11 +17,16 @@
 #ifdef HAVE_AUDIO
 #include "CTvAudio.h"
 #endif
-
+#ifdef STREAM_BOX
+#define CONFIG_FILE_PATH_DEF               "/etc/tvconfig/tvconfig.conf"
+#define DOLBY_VISION_TV_KO_PATH            "/usr/lib/modules/dovi_tv.ko"
+#define DOLBY_VISION_STB_KO_PATH           "/usr/lib/modules/dovi.ko"
+#else
 #define CONFIG_FILE_PATH_DEF               "/vendor/etc/tvconfig/tvconfig.conf"
-
 #define DOLBY_VISION_TV_KO_PATH            "/vendor/lib/modules/dovi_tv.ko"
 #define DOLBY_VISION_STB_KO_PATH           "/vendor/lib/modules/dovi.ko"
+#endif
+
 #define DOLBY_VISION_ENABLE_PATH           "/sys/module/amdolby_vision/parameters/dolby_vision_enable"
 
 #define VIDEO_SYNC_ENABLE   "/sys/class/tsync/enable"

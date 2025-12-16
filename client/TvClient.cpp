@@ -33,37 +33,116 @@ sp<TvClient> TvClient::mInstance;
 sp<TvClient::DeathNotifier> TvClient::mDeathNotifier;
 
 TvClient *TvClient::GetInstance() {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     if (mInstance.get() == nullptr) {
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: mInstance is null, about to create new TvClient()\n", __FUNCTION__);
+        fflush(stdout);
+#endif
         mInstance = new TvClient();
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: Created new TvClient(), mInstance = %p\n", __FUNCTION__, mInstance.get());
+        fflush(stdout);
+#endif
+    } else {
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: mInstance already exists, returning existing instance\n", __FUNCTION__);
+        fflush(stdout);
+#endif
     }
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT, returning %p\n", __FUNCTION__, mInstance.get());
+    fflush(stdout);
+#endif
     return mInstance.get();
 }
 
 TvClient::TvClient() {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     init_tv_logging();
     LOGD("%s.\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to lock mutex\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     pthread_mutex_lock(&tvclient_mutex);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Mutex locked, about to get ProcessState\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     sp<ProcessState> proc(ProcessState::self());
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to start thread pool\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     proc->startThreadPool();
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to get ServiceManager\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     Parcel send, reply;
     sp<IServiceManager> sm = defaultServiceManager();
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to wait for tvservice (infinite loop)\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     do {
         tvServicebinder = sm->getService(String16("tvservice"));
-        if (tvServicebinder != 0) break;
+        if (tvServicebinder != 0) {
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Got tvservice binder, breaking loop\n", __FUNCTION__);
+            fflush(stdout);
+#endif
+            break;
+        }
         LOGD("TvClient: Waiting tvservice published.\n");
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: tvservice not found, sleeping 500ms...\n", __FUNCTION__);
+        fflush(stdout);
+#endif
         usleep(500000);
     } while(true);
     if (mDeathNotifier == NULL) {
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: Creating DeathNotifier\n", __FUNCTION__);
+        fflush(stdout);
+#endif
        mDeathNotifier = new DeathNotifier();
     }
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to linkToDeath\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     tvServicebinder->linkToDeath(mDeathNotifier);
     LOGD("Connected to tvservice.\n");
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to transact CMD_SET_TV_CB\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     send.writeStrongBinder(sp<IBinder>(this));
     tvServicebinder->transact(CMD_SET_TV_CB, send, &reply);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from CMD_SET_TV_CB transact\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     tvServicebinderId = reply.readInt32();
     LOGD("tvServicebinderId:%d.\n",tvServicebinderId);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to unlock mutex\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     pthread_mutex_unlock(&tvclient_mutex);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT\n", __FUNCTION__);
+    fflush(stdout);
+#endif
 }
 
 TvClient::~TvClient() {
@@ -90,17 +169,29 @@ void TvClient::Release() {
 int TvClient::SendMethodCall(char *CmdString)
 {
     LOGD("%s.\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, CmdString = %s\n", __FUNCTION__, CmdString);
+    fflush(stdout);
+#endif
     int ReturnVal = 0;
     Parcel send, reply;
 
     if (tvServicebinder != NULL) {
         send.writeCString(CmdString);
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: About to call binder->transact(CMD_TV_ACTION, ...)\n", __FUNCTION__);
+        fflush(stdout);
+#endif
         if (tvServicebinder->transact(CMD_TV_ACTION, send, &reply) != 0) {
         ReturnVal = reply.readExceptionCode();
         LOGE("%s: tvServicebinder failed, error code:%d\n", __FUNCTION__, ReturnVal);
         } else {
         ReturnVal = reply.readInt32();
         }
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: Returned from binder->transact(), ReturnVal = %d\n", __FUNCTION__, ReturnVal);
+        fflush(stdout);
+#endif
     } else {
         LOGE("%s: tvServicebinder is NULL.\n", __FUNCTION__);
     }
@@ -228,16 +319,42 @@ int TvClient::setTvClientObserver(TvClientIObserver *observer)
 
 int TvClient::StartTv(tv_source_input_t source) {
     LOGD("%s\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, source = %d\n", __FUNCTION__, source);
+    fflush(stdout);
+#endif
     char buf[32] = {0};
     sprintf(buf, "control.%d.%d", TV_CONTROL_START_TV, source);
-    return SendMethodCall(buf);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call SendMethodCall(\"%s\")\n", __FUNCTION__, buf);
+    fflush(stdout);
+#endif
+    int ret = SendMethodCall(buf);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from SendMethodCall(), ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
+    return ret;
 }
 
 int TvClient::StopTv(tv_source_input_t source) {
     LOGD("%s\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, source = %d\n", __FUNCTION__, source);
+    fflush(stdout);
+#endif
     char buf[32] = {0};
     sprintf(buf, "control.%d.%d", TV_CONTROL_STOP_TV, source);
-    return SendMethodCall(buf);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call SendMethodCall(\"%s\")\n", __FUNCTION__, buf);
+    fflush(stdout);
+#endif
+    int ret = SendMethodCall(buf);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from SendMethodCall(), ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
+    return ret;
 }
 
 int TvClient::SetVdinWorkMode(vdin_work_mode_t vdinWorkMode)

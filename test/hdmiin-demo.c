@@ -64,16 +64,56 @@ static void signal_handler(int s)
 }
 
 int main(int argc, char **argv) {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: main() ENTRY\n");
+    fflush(stdout);
+#endif
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to call GetInstance()\n");
+    fflush(stdout);
+#endif
     struct TvClientWrapper_t * pTvClientWrapper = GetInstance();
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: Returned from GetInstance(), pTvClientWrapper = %p\n", pTvClientWrapper);
+    fflush(stdout);
+#endif
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to call setTvEventCallback()\n");
+    fflush(stdout);
+#endif
     setTvEventCallback(TvEventCallback);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to call StopTv(SOURCE_HDMI2)\n");
+    fflush(stdout);
+#endif
     tv_source_input_t CurrentSource = SOURCE_HDMI2;
 	StopTv(pTvClientWrapper, CurrentSource);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: Returned from StopTv()\n");
+    fflush(stdout);
+#endif
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to sleep(1)\n");
+    fflush(stdout);
+#endif
 	sleep(1);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: Woke up from sleep, about to call DisplayInit()\n");
+    fflush(stdout);
+#endif
 
     DisplayInit();
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: Returned from DisplayInit(), about to call StartTv()\n");
+    fflush(stdout);
+#endif
 
     StartTv(pTvClientWrapper, CurrentSource);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: Returned from StartTv()\n");
+    fflush(stdout);
+#endif
 
 	signal(SIGINT, signal_handler);
 

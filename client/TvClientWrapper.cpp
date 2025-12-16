@@ -23,8 +23,28 @@ typedef void (*TvClientEventCallbackFunc)(event_type_t eventType, void *eventDat
 class TvClientWrapper: public TvClient::TvClientIObserver {
 public:
     TvClientWrapper() {
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] TvClientWrapper::TvClientWrapper: ENTRY\n");
+        fflush(stdout);
+#endif
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] TvClientWrapper::TvClientWrapper: About to call TvClient::GetInstance()\n");
+        fflush(stdout);
+#endif
         mpTvClient = TvClient::GetInstance();
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] TvClientWrapper::TvClientWrapper: Returned from TvClient::GetInstance(), mpTvClient = %p\n", mpTvClient);
+        fflush(stdout);
+#endif
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] TvClientWrapper::TvClientWrapper: About to call setTvClientObserver()\n");
+        fflush(stdout);
+#endif
         mpTvClient->setTvClientObserver(this);
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] TvClientWrapper::TvClientWrapper: EXIT\n");
+        fflush(stdout);
+#endif
     }
 
     ~TvClientWrapper() {
@@ -50,7 +70,16 @@ public:
     }
 
     int StopTv(tv_source_input_t source) {
-        return mpTvClient->StopTv(source);
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] TvClientWrapper::StopTv: ENTRY, source = %d\n", source);
+        fflush(stdout);
+#endif
+        int ret = mpTvClient->StopTv(source);
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] TvClientWrapper::StopTv: Returned from mpTvClient->StopTv(), ret = %d\n", ret);
+        fflush(stdout);
+#endif
+        return ret;
     }
 
     int SetEdidVersion(tv_source_input_t source, int edidVer) {
@@ -223,8 +252,24 @@ struct TvClientWrapper_t {
 struct TvClientWrapper_t *GetInstance(void)
 {
     LOGD("%s: start GetInstance.\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY\n", __FUNCTION__);
+    fflush(stdout);
+#endif
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to create TvClientWrapper_t\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     struct TvClientWrapper_t *pTvClientWrapper = new struct TvClientWrapper_t;
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Created TvClientWrapper_t, about to RegisterCallback\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     pTvClientWrapper->tvClientWrapper.RegisterCallback(HandleTvClientEvent);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT, returning pTvClientWrapper = %p\n", __FUNCTION__, pTvClientWrapper);
+    fflush(stdout);
+#endif
 
     return pTvClientWrapper;
 }
@@ -242,7 +287,16 @@ int StartTv(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source
 
 int StopTv(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source)
 {
-    return pTvClientWrapper->tvClientWrapper.StopTv(source);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] StopTv (wrapper): ENTRY, source = %d\n", source);
+    fflush(stdout);
+#endif
+    int ret = pTvClientWrapper->tvClientWrapper.StopTv(source);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] StopTv (wrapper): EXIT, ret = %d\n", ret);
+    fflush(stdout);
+#endif
+    return ret;
 }
 
 int SetEdidVersion(TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source, int edidVer)

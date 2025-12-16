@@ -69,8 +69,20 @@ int CAmVideo::AmVideoDeviceIOCtl(int request, ...)
 
 int CAmVideo::SetVideoLayerStatus(int status)
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, status=%d\n", __FUNCTION__, status);
+    fflush(stdout);
+#endif
     int ret = -1;
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call AmVideoDeviceIOCtl(AMSTREAM_IOC_SET_VIDEO_DISABLE)\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     ret = AmVideoDeviceIOCtl(AMSTREAM_IOC_SET_VIDEO_DISABLE, &status);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from AmVideoDeviceIOCtl(), ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     if (ret < 0) {
         LOGE("%s:[%d] failed.\n", __FUNCTION__, status);
     } else {
@@ -100,8 +112,20 @@ int CAmVideo::GetVideoLayerStatus(int *status)
 
 int CAmVideo::SetVideoGlobalOutputMode(int mode)
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, mode=%d\n", __FUNCTION__, mode);
+    fflush(stdout);
+#endif
     int ret = -1;
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call AmVideoDeviceIOCtl(AMSTREAM_IOC_GLOBAL_SET_VIDEO_OUTPUT)\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     ret = AmVideoDeviceIOCtl(AMSTREAM_IOC_GLOBAL_SET_VIDEO_OUTPUT, &mode);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from AmVideoDeviceIOCtl(), ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     if (ret < 0) {
         LOGE("%s failed.\n", __FUNCTION__);
     } else {

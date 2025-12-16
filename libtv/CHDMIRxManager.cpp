@@ -27,8 +27,28 @@
 
 CHDMIRxManager::CHDMIRxManager()
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY\n", __FUNCTION__);
+    fflush(stdout);
+#endif
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call HDMIRxOpenMoudle()\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     mHdmiRxDeviceId = HDMIRxOpenMoudle();
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from HDMIRxOpenMoudle(), mHdmiRxDeviceId = %d\n", __FUNCTION__, mHdmiRxDeviceId);
+    fflush(stdout);
+#endif
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call HdmiEnableSPDFifo(true)\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     HdmiEnableSPDFifo(true);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT\n", __FUNCTION__);
+    fflush(stdout);
+#endif
 }
 
 CHDMIRxManager::~CHDMIRxManager()
@@ -38,7 +58,15 @@ CHDMIRxManager::~CHDMIRxManager()
 
 int CHDMIRxManager::HDMIRxOpenMoudle()
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, about to open %s\n", __FUNCTION__, CS_HDMIRX_DEV_PATH);
+    fflush(stdout);
+#endif
     int fd = open ( CS_HDMIRX_DEV_PATH, O_RDWR );
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from open(), fd = %d\n", __FUNCTION__, fd);
+    fflush(stdout);
+#endif
     if ( fd < 0 ) {
         LOGE("Open %s error(%s)!\n", CS_HDMIRX_DEV_PATH, strerror ( errno ));
         return -1;

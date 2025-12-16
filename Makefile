@@ -20,6 +20,10 @@ else
 CFLAGS += -DDISABLE_UBOOTENV
 endif
 
+#for debug
+CFLAGS += -DSTREAM_BOX_TRACE
+CFLAGS += -DSTREAM_BOX_LEGACY
+
 LDFLAGS += -L $(OUT_DIR)/
 
 ################################################################################
@@ -79,7 +83,7 @@ hdmiin-demo_SRCS  = \
 
 # ---------------------------------------------------------------------
 #  Build rules
-BUILD_TARGETS = libtvclient.so libtv.so tvservice tvtest hdmiin-demo
+BUILD_TARGETS = libtvclient.so libtv.so tvservice hdmiin-demo
 BUILD_TARGETS_FULLPATH := $(patsubst %, $(OUT_DIR)/%, $(BUILD_TARGETS))
 
 .PHONY: all install clean

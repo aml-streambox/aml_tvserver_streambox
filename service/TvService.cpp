@@ -163,7 +163,15 @@ int TvService::SendSignalForSignalDetectEvent(CTvEvent &event)
 
 int TvService::ParserTvCommand(const char *commandData)
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, commandData=%s\n", __FUNCTION__, commandData);
+    fflush(stdout);
+#endif
     pthread_mutex_lock(&tvservice_mutex);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Mutex LOCKED\n", __FUNCTION__);
+    fflush(stdout);
+#endif
 
     int ret = 0;
     tvin_frontend_info_t frontendInfo;
@@ -183,11 +191,27 @@ int TvService::ParserTvCommand(const char *commandData)
         if (moduleID == TV_CONTROL_START_TV) {
             temp = strtok(NULL, delimitation);
             tv_source_input_t startSource = (tv_source_input_t)atoi(temp);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: About to call mpTv->StartTv(source=%d)\n", __FUNCTION__, startSource);
+            fflush(stdout);
+#endif
             ret = mpTv->StartTv(startSource);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Returned from mpTv->StartTv(), ret=%d\n", __FUNCTION__, ret);
+            fflush(stdout);
+#endif
         } else if (moduleID == TV_CONTROL_STOP_TV) {
             temp = strtok(NULL, delimitation);
             tv_source_input_t stopSource = (tv_source_input_t)atoi(temp);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: About to call mpTv->StopTv(source=%d)\n", __FUNCTION__, stopSource);
+            fflush(stdout);
+#endif
             ret = mpTv->StopTv(stopSource);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Returned from mpTv->StopTv(), ret=%d\n", __FUNCTION__, ret);
+            fflush(stdout);
+#endif
         } else if (moduleID == TV_CONTROL_VDIN_WORK_MODE_SET) {
             temp = strtok(NULL, delimitation);
             vdin_work_mode_t setVdinWorkMode = (vdin_work_mode_t)atoi(temp);
@@ -290,7 +314,15 @@ int TvService::ParserTvCommand(const char *commandData)
         LOGD("%s: invalie cmdType!\n", __FUNCTION__);
     }
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to unlock mutex, ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     pthread_mutex_unlock(&tvservice_mutex);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Mutex UNLOCKED, returning ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     return ret;
 }
 
@@ -405,13 +437,33 @@ status_t TvService::onTransact(uint32_t code,
                                 const Parcel& data, Parcel* reply,
                                 uint32_t flags) {
     LOGD("%s: cmd is %d.\n", __FUNCTION__, code);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, code = %d\n", __FUNCTION__, code);
+    fflush(stdout);
+#endif
     unsigned char dataBuf[1024] = {0};
     int count = 0;
     switch (code) {
         case CMD_TV_ACTION: {
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: CMD_TV_ACTION case, about to read command string\n", __FUNCTION__);
+            fflush(stdout);
+#endif
             const char* command = data.readCString();
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Read command = %s, about to call ParserTvCommand\n", __FUNCTION__, command);
+            fflush(stdout);
+#endif
             int ret = ParserTvCommand(command);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Returned from ParserTvCommand, ret = %d, about to write reply\n", __FUNCTION__, ret);
+            fflush(stdout);
+#endif
             reply->writeInt32(ret);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Wrote reply, about to return\n", __FUNCTION__);
+            fflush(stdout);
+#endif
             break;
         }
         case DATA_SET_ACTION: {

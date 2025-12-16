@@ -272,18 +272,50 @@ int CTvin::AFE_DeviceIOCtl ( int request, ... )
 int CTvin::Tvin_OpenPort(tvin_port_t source_port)
 {
     LOGD ("%s, source_port = %x!\n", __FUNCTION__,  source_port);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, source_port = 0x%x\n", __FUNCTION__, source_port);
+    fflush(stdout);
+#endif
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call VDIN_OpenPort(source_port=0x%x)\n", __FUNCTION__, source_port);
+    fflush(stdout);
+#endif
     int ret = VDIN_OpenPort(source_port);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from VDIN_OpenPort(), ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT, returning ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     return ret;
 }
 
 int CTvin::Tvin_ClosePort(tvin_port_t source_port)
 {
     LOGD ("%s, source_port = %x!\n", __FUNCTION__,  source_port);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, source_port = 0x%x\n", __FUNCTION__, source_port);
+    fflush(stdout);
+#endif
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call VDIN_ClosePort()\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     int ret = VDIN_ClosePort();
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from VDIN_ClosePort(), ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT, returning ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     return ret;
 }
 
@@ -571,17 +603,33 @@ int CTvin::Tvin_StartDecoder(tvin_info_t info)
 
 int CTvin::Tvin_StopDecoder()
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, mDecoderStarted=%d\n", __FUNCTION__, mDecoderStarted);
+    fflush(stdout);
+#endif
     if (!mDecoderStarted) {
         LOGD("Decoder don't started!\n");
         return 0;
     } else {
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: About to call VDIN_StopDec()\n", __FUNCTION__);
+        fflush(stdout);
+#endif
         if ( VDIN_StopDec() >= 0 ) {
             LOGD("StopDecoder ok!\n");
             mDecoderStarted = false;
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: EXIT, success\n", __FUNCTION__);
+            fflush(stdout);
+#endif
             return 0;
         } else {
             LOGE("StopDecoder failed!\n");
             mDecoderStarted = false;
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: EXIT, failed\n", __FUNCTION__);
+            fflush(stdout);
+#endif
             return -1;
         }
     }

@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "CTv.h"
 #include "tvutils.h"
@@ -129,21 +130,59 @@ CTv::~CTv()
 int CTv::StartTv(tv_source_input_t source)
 {
     LOGD("%s: source = %d!\n", __FUNCTION__, source);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, source = %d\n", __FUNCTION__, source);
+    fflush(stdout);
+#endif
     int ret = 0;
 
     if (SOURCE_MPEG == source) {
     LOGD("%s: new source is %d! RETURN\n", __FUNCTION__,source);
     return ret;
     }
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to write VIDEO_FREERUN_MODE\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     tvWriteSysfs(VIDEO_FREERUN_MODE, "0");
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call CVpp::setVideoaxis()\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     CVpp::getInstance()->setVideoaxis();//when open source set video axis full screen
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to get source port\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     tvin_port_t source_port = mpTvin->Tvin_GetSourcePortBySourceInput(source);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Got source_port = 0x%x, about to call Tvin_OpenPort()\n", __FUNCTION__, source_port);
+    fflush(stdout);
+#endif
     ret = mpTvin->Tvin_OpenPort(source_port);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from Tvin_OpenPort(), ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     mCurrentSource = source;
 #ifdef HAVE_AUDIO
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to create audio patch\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     CTvAudio::getInstance()->create_audio_patch(mapSourcetoAudiotupe(source));
+#ifndef STREAM_BOX_LEGACY
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to set audio av mute\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     CTvAudio::getInstance()->set_audio_av_mute(true);
+#endif
+#endif
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT, returning ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
 #endif
     return ret;
 }
@@ -151,6 +190,10 @@ int CTv::StartTv(tv_source_input_t source)
 int CTv::StopTv(tv_source_input_t source)
 {
     LOGD("%s: source = %d!\n", __FUNCTION__, source);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, source = %d\n", __FUNCTION__, source);
+    fflush(stdout);
+#endif
     int ret = 0;
     if (SOURCE_MPEG == source) {
     LOGD("%s:current source is %d! return\n", __FUNCTION__,source);
@@ -158,14 +201,48 @@ int CTv::StopTv(tv_source_input_t source)
     }
 
 #ifdef HAVE_AUDIO
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to release audio patch\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     CTvAudio::getInstance()->release_audio_patch();
+#ifndef STREAM_BOX_LEGACY
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to set audio av mute false\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     CTvAudio::getInstance()->set_audio_av_mute(false);
 #endif
+#endif
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to disable video layer\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to disable video global output mode\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     mpAmVideo->SetVideoGlobalOutputMode(VIDEO_GLOBAL_OUTPUT_MODE_DISABLE);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to stop decoder\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     mpTvin->Tvin_StopDecoder();
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to get source port\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     tvin_port_t source_port = mpTvin->Tvin_GetSourcePortBySourceInput(source);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Got source_port = 0x%x, about to call Tvin_ClosePort()\n", __FUNCTION__, source_port);
+    fflush(stdout);
+#endif
     mpTvin->Tvin_ClosePort(source_port);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from Tvin_ClosePort()\n", __FUNCTION__);
+    fflush(stdout);
+#endif
 
     mVdinWorkMode = VDIN_WORK_MODE_VFM;
     mCurrentSource = SOURCE_INVALID;
@@ -180,6 +257,10 @@ int CTv::StopTv(tv_source_input_t source)
     tempSignalInfo.aspect_ratio = TVIN_ASPECT_NULL;
     SetCurrenSourceInfo(tempSignalInfo);
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: EXIT, returning ret = %d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     return ret;
 }
 
@@ -430,8 +511,11 @@ int CTv::GetEDIDData(tv_source_input_t source, char *data)
     int port = (int)source - SOURCE_HDMI1 + 1;
     int edidVer = (GetEdidVersion(source) == HDMI_EDID_VER_20)?20:14;
     char dv_support[4] = {0};
-
+#ifdef STREAM_BOX
+    const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, "/etc/tvconfig/hdmi");
+#else
     const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, "/vendor/etc/tvconfig/hdmi");
+#endif
 
     if (GetDolbyVisionSupportStatus() == 1)
         strcpy(dv_support, "_dv");
@@ -490,9 +574,13 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
     tvin_port_t tvin_port = TVIN_PORT_NULL;
     ui_hdmi_port_id_t ui_port = UI_HDMI_PORT_ID_MAX;
     tv_source_input_t source_input;
+#ifdef STREAM_BOX
+    const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, "/etc/tvconfig/hdmi");
+#else
     const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI,
             CFG_HDMI_EDID_FILE_PATH,
             "/vendor/etc/tvconfig/hdmi");
+#endif
     LOGD("%s: sizeof edidLoadBuf:[%d] isDolbyVisionEnable = %d.\n",
             __FUNCTION__,
             sizeof(edidLoadBuf),
@@ -780,7 +868,9 @@ void CTv::onSigToStable()
     mpTvin->Tvin_StartDecoder(mCurrentSignalInfo);
 
 #ifdef HAVE_AUDIO
+#ifndef STREAM_BOX_LEGACY
             CTvAudio::getInstance()->set_audio_av_mute(false);
+#endif
 #endif
 
     CMessage msg;
@@ -807,7 +897,9 @@ void CTv::onSigToUnstable()
     mpTvin->Tvin_StopDecoder();
 
 #ifdef HAVE_AUDIO
+#ifndef STREAM_BOX_LEGACY
             CTvAudio::getInstance()->set_audio_av_mute(true);
+#endif
 #endif
 
     LOGD("signal to Unstable!\n");
@@ -822,7 +914,9 @@ void CTv::onSigToUnSupport()
     mpTvin->Tvin_StopDecoder();
 
 #ifdef HAVE_AUDIO
+#ifndef STREAM_BOX_LEGACY
             CTvAudio::getInstance()->set_audio_av_mute(true);
+#endif
 #endif
 
     TvEvent::SignalDetectEvent event;
@@ -851,7 +945,9 @@ void CTv::onSigToNoSig()
         mpTvin->Tvin_StopDecoder();
 
     #ifdef HAVE_AUDIO
+    #ifndef STREAM_BOX_LEGACY
         CTvAudio::getInstance()->set_audio_av_mute(true);
+    #endif
     #endif
     }
 
