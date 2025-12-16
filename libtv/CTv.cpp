@@ -89,7 +89,11 @@ CTv::CTv()
         LOGD("%s: EDID data load by tvserver!\n", __FUNCTION__);
         const char* buf = GetUenv(HDMI_UBOOT_EDID_VERSION);
         if (buf == NULL) {
+#ifdef STREAM_BOX
+            const char* edidDefaultVersion = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_DEFAULT_VERSION, "2.0");
+#else
             const char* edidDefaultVersion = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_DEFAULT_VERSION, "1.4");
+#endif
             int edidSetValue = 0;
             if (strcmp(edidDefaultVersion, "2.0") == 0 ) {
                 LOGD("%s: Set EDID default version to 2.0!\n", __FUNCTION__);
@@ -743,7 +747,11 @@ int CTv::SetEdidVersion(tv_source_input_t source, tv_hdmi_edid_version_t edidVer
 int CTv::GetEdidVersion(tv_source_input_t source)
 {
     //TODO:add user setting read/write flow
+#ifdef STREAM_BOX
+    int retValue = HDMI_EDID_VER_20; // Default to 2.0 instead of 1.4
+#else
     int retValue = HDMI_EDID_VER_14;
+#endif
     const char *buf = GetUenv(HDMI_UBOOT_EDID_VERSION);
     int version = 0;
     ui_hdmi_port_id_t port_id = UI_HDMI_PORT_ID_MAX;
@@ -755,18 +763,30 @@ int CTv::GetEdidVersion(tv_source_input_t source)
     case UI_HDMI_PORT_ID_1:
         //retValue = Hdmi1CurrentEdidVer;
         retValue = version & 0xf;
+#ifdef STREAM_BOX
+        if (retValue == 0) retValue = HDMI_EDID_VER_20; // Default to 2.0 if not set
+#endif
         break;
     case UI_HDMI_PORT_ID_2:
         //retValue = Hdmi2CurrentEdidVer;
         retValue = (version >> 4) & 0xf;
+#ifdef STREAM_BOX
+        if (retValue == 0) retValue = HDMI_EDID_VER_20; // Default to 2.0 if not set
+#endif
         break;
     case UI_HDMI_PORT_ID_3:
         //retValue = Hdmi3CurrentEdidVer;
         retValue = (version >> 8) & 0xf;
+#ifdef STREAM_BOX
+        if (retValue == 0) retValue = HDMI_EDID_VER_20; // Default to 2.0 if not set
+#endif
         break;
     case UI_HDMI_PORT_ID_4:
         //retValue = Hdmi4CurrentEdidVer;
         retValue = (version >> 12) & 0xf;
+#ifdef STREAM_BOX
+        if (retValue == 0) retValue = HDMI_EDID_VER_20; // Default to 2.0 if not set
+#endif
         break;
     default:
         LOGD("%s: not hdmi source.\n", __FUNCTION__);
