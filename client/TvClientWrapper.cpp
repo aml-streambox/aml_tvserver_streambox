@@ -172,6 +172,38 @@ public:
         return mpTvClient->GetCurrentSourceAllmInfo(info);
     }
 
+#ifdef STREAM_BOX
+    int SetHdmiAllmEnabled(int enable)
+    {
+        return mpTvClient->SetHdmiAllmEnabled(enable ? true : false);
+    }
+
+    int GetHdmiAllmEnabled()
+    {
+        return mpTvClient->GetHdmiAllmEnabled() ? 1 : 0;
+    }
+
+    int SetHdmiVrrEnabled(int enable)
+    {
+        return mpTvClient->SetHdmiVrrEnabled(enable ? true : false);
+    }
+
+    int GetHdmiVrrEnabled()
+    {
+        return mpTvClient->GetHdmiVrrEnabled() ? 1 : 0;
+    }
+
+    int SetGameMode(int enable)
+    {
+        return mpTvClient->SetGameMode(enable ? true : false);
+    }
+
+    int SetPcMode(int enable)
+    {
+        return mpTvClient->SetPcMode(enable ? true : false);
+    }
+#endif
+
     void onTvClientEvent(CTvEvent &event) {
         int eventType = event.getEventType();
         LOGD("%s: eventType: %d.\n", __FUNCTION__, eventType);
@@ -388,6 +420,38 @@ int SetEdidBoostOn(struct TvClientWrapper_t *pTvClientWrapper, int bBoostOn)
 {
     return pTvClientWrapper->tvClientWrapper.SetEdidBoostOn(bBoostOn);
 }
+
+#ifdef STREAM_BOX
+int SetHdmiAllmEnabled(struct TvClientWrapper_t *pTvClientWrapper, int enable)
+{
+    return pTvClientWrapper->tvClientWrapper.SetHdmiAllmEnabled(enable);
+}
+
+int GetHdmiAllmEnabled(struct TvClientWrapper_t *pTvClientWrapper)
+{
+    return pTvClientWrapper->tvClientWrapper.GetHdmiAllmEnabled();
+}
+
+int SetHdmiVrrEnabled(struct TvClientWrapper_t *pTvClientWrapper, int enable)
+{
+    return pTvClientWrapper->tvClientWrapper.SetHdmiVrrEnabled(enable);
+}
+
+int GetHdmiVrrEnabled(struct TvClientWrapper_t *pTvClientWrapper)
+{
+    return pTvClientWrapper->tvClientWrapper.GetHdmiVrrEnabled();
+}
+
+int SetGameMode(struct TvClientWrapper_t *pTvClientWrapper, int enable)
+{
+    return pTvClientWrapper->tvClientWrapper.SetGameMode(enable);
+}
+
+int SetPcMode(struct TvClientWrapper_t *pTvClientWrapper, int enable)
+{
+    return pTvClientWrapper->tvClientWrapper.SetPcMode(enable);
+}
+#endif
 
 #ifdef __cplusplus
 };

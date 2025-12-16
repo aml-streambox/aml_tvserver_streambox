@@ -310,11 +310,27 @@ void CHDMIRxManager::SetHDMIFeatureInit(int allmEnable, int VrrEnable)
 
 int CHDMIRxManager::SetAllmEnabled(int enable)
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, enable=%d\n", __FUNCTION__, enable);
+    fflush(stdout);
+#endif
     int ret = -1;
     char buf[8] = {0};
     sprintf(buf, "%d", enable);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to write '%s' to %s\n", __FUNCTION__, buf, HDMI_SET_ALLM_PARAM);
+    fflush(stdout);
+#endif
     tvWriteSysfs(HDMI_SET_ALLM_PARAM, buf);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE)\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     ret = HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from HDMIRxDeviceIOCtl(), ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     return ret;
 }
 
@@ -331,11 +347,27 @@ int CHDMIRxManager::GetAllmEnabled()
 
 int CHDMIRxManager::SetVrrEnabled(int enable)
 {
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, enable=%d\n", __FUNCTION__, enable);
+    fflush(stdout);
+#endif
     int ret = -1;
     char buf[8] = {0};
     sprintf(buf, "%d", enable);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to write '%s' to %s\n", __FUNCTION__, buf, HDMI_VRR_ENABLED);
+    fflush(stdout);
+#endif
     tvWriteSysfs(HDMI_VRR_ENABLED, buf);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE)\n", __FUNCTION__);
+    fflush(stdout);
+#endif
     ret = HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from HDMIRxDeviceIOCtl(), ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
     return ret;
 }
 

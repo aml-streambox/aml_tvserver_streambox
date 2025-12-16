@@ -86,6 +86,10 @@ public:
     int Tvin_GetSignalInfo(tvin_info_s *SignalInfo);
     int Tvin_GetAllmInfo(tvin_latency_s *AllmInfo);
     int VDIN_GetVrrFreesyncParm(struct vdin_vrr_freesync_param_s *vrrparm);
+#ifdef STREAM_BOX
+    int Tvin_SetGameMode(unsigned int enable);
+    int Tvin_SetPcMode(unsigned int enable);
+#endif
     int Tvin_GetVdinDeviceFd(void);
     int Tvin_CheckVideoPathComplete(tv_path_type_t path_type);
     int Tvin_AddVideoPath(int selPath);

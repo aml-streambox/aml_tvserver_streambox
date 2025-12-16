@@ -85,6 +85,10 @@ public:
     int SetHdmiVrrEnabled(bool enable);
     bool GetHdmiVrrEnabled();
     vdin_vrr_mode_t GetHdmiVrrMode();
+#ifdef STREAM_BOX
+    int SetGameMode(bool enable);
+    int SetPcMode(bool enable);
+#endif
 
 private:
     int SendMethodCall(char *CmdString);

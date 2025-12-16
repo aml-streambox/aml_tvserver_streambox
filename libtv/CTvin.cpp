@@ -702,6 +702,28 @@ int CTvin::VDIN_GetVrrFreesyncParm(struct vdin_vrr_freesync_param_s *vrrparm)
     return ret;
 }
 
+#ifdef STREAM_BOX
+int CTvin::Tvin_SetGameMode(unsigned int enable)
+{
+    LOGD("%s: enable=%u\n", __FUNCTION__, enable);
+    int ret = VDIN_DeviceIOCtl(TVIN_IOC_GAME_MODE, &enable);
+    if (ret < 0) {
+        LOGE("%s failed, error(%s)\n", __FUNCTION__, strerror(errno));
+    }
+    return ret;
+}
+
+int CTvin::Tvin_SetPcMode(unsigned int enable)
+{
+    LOGD("%s: enable=%u\n", __FUNCTION__, enable);
+    int ret = VDIN_DeviceIOCtl(TVIN_IOC_S_PC_MODE, &enable);
+    if (ret < 0) {
+        LOGE("%s failed, error(%s)\n", __FUNCTION__, strerror(errno));
+    }
+    return ret;
+}
+#endif
+
 int CTvin::Tvin_GetVdinDeviceFd(void)
 {
     int ret = -1;

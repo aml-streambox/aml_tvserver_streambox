@@ -601,6 +601,24 @@ vdin_vrr_mode_t TvClient::GetHdmiVrrMode()
     return (vdin_vrr_mode_t)SendMethodCall(buf);
 }
 
+#ifdef STREAM_BOX
+int TvClient::SetGameMode(bool enable)
+{
+    LOGD("%s: %s\n", __FUNCTION__, enable?"enable":"disable");
+    char buf[32] = {0};
+    sprintf(buf, "hdmi.%d.%d", HDMI_SET_GAME_MODE, enable?1:0);
+    return SendMethodCall(buf);
+}
+
+int TvClient::SetPcMode(bool enable)
+{
+    LOGD("%s: %s\n", __FUNCTION__, enable?"enable":"disable");
+    char buf[32] = {0};
+    sprintf(buf, "hdmi.%d.%d", HDMI_SET_PC_MODE, enable?1:0);
+    return SendMethodCall(buf);
+}
+#endif
+
 status_t TvClient::onTransact(uint32_t code,
                                 const Parcel& data, Parcel* reply,
                                 uint32_t flags) {

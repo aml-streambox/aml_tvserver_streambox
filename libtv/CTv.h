@@ -75,6 +75,10 @@ public:
     int GetHdmiAllmEnabled();
     int SetHdmiVrrEnabled(int enable);
     int GetHdmiVrrEnabled();
+#ifdef STREAM_BOX
+    int SetGameMode(int enable);
+    int SetPcMode(int enable);
+#endif
 
 private:
     void onSigStatusChange(void);

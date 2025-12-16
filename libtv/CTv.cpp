@@ -1070,19 +1070,36 @@ bool CTv::GetDolbyVisionSupportStatus(void) {
 int CTv::SetHdmiAllmEnabled(int enable)
 {
     LOGD("%s: [%s]\n", __FUNCTION__, enable == 1?"enable":"disable");
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, enable=%d\n", __FUNCTION__, enable);
+    fflush(stdout);
+#endif
     const char *buf = GetUenv(HDMI_UBOOT_EDID_FEATURE);
     int saveValue = 0;
     if (buf) {
         saveValue = atoi(buf);
         if ((saveValue & 0x1) == enable) {
             LOGD("%s: same status return!\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Same status, returning early\n", __FUNCTION__);
+            fflush(stdout);
+#endif
             return 0;
         }
     }
     muteVideoOnHDMISource();
     saveValue = enable|(saveValue & 0b0010);
     SetUenv(HDMI_UBOOT_EDID_FEATURE,  std::to_string(saveValue).c_str());
-    return mpHDMIRxManager->SetAllmEnabled(enable);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call mpHDMIRxManager->SetAllmEnabled(%d)\n", __FUNCTION__, enable);
+    fflush(stdout);
+#endif
+    int ret = mpHDMIRxManager->SetAllmEnabled(enable);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from mpHDMIRxManager->SetAllmEnabled(), ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
+    return ret;
 }
 
 int CTv::GetHdmiAllmEnabled()
@@ -1095,19 +1112,36 @@ int CTv::GetHdmiAllmEnabled()
 int CTv::SetHdmiVrrEnabled(int enable)
 {
     LOGD("%s: [%s]\n", __FUNCTION__, enable == 1?"enable":"disable");
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: ENTRY, enable=%d\n", __FUNCTION__, enable);
+    fflush(stdout);
+#endif
     const char*buf = GetUenv(HDMI_UBOOT_EDID_FEATURE);
     int saveValue = 0;
     if (buf) {
         saveValue = atoi(buf);
         if ((saveValue >> 1) == enable) {
             LOGD("%s: same status return!\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Same status, returning early\n", __FUNCTION__);
+            fflush(stdout);
+#endif
             return 0;
         }
     }
     muteVideoOnHDMISource();
     saveValue = (enable << 1)|(saveValue & 0b0001);
     SetUenv(HDMI_UBOOT_EDID_FEATURE,  std::to_string(saveValue).c_str());
-    return mpHDMIRxManager->SetVrrEnabled(enable);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: About to call mpHDMIRxManager->SetVrrEnabled(%d)\n", __FUNCTION__, enable);
+    fflush(stdout);
+#endif
+    int ret = mpHDMIRxManager->SetVrrEnabled(enable);
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] %s: Returned from mpHDMIRxManager->SetVrrEnabled(), ret=%d\n", __FUNCTION__, ret);
+    fflush(stdout);
+#endif
+    return ret;
 }
 
 int CTv::GetHdmiVrrEnabled()
@@ -1116,6 +1150,20 @@ int CTv::GetHdmiVrrEnabled()
     LOGD("%s: [%d]\n", __FUNCTION__, ret);
     return ret;
 }
+
+#ifdef STREAM_BOX
+int CTv::SetGameMode(int enable)
+{
+    LOGD("%s: enable=%d\n", __FUNCTION__, enable);
+    return mpTvin->Tvin_SetGameMode(enable ? 1 : 0);
+}
+
+int CTv::SetPcMode(int enable)
+{
+    LOGD("%s: enable=%d\n", __FUNCTION__, enable);
+    return mpTvin->Tvin_SetPcMode(enable ? 1 : 0);
+}
+#endif
 
 void CTv::muteVideoOnHDMISource() {
     if (mCurrentSource < SOURCE_HDMI1 || mCurrentSource > SOURCE_HDMI4) {

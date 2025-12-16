@@ -274,8 +274,16 @@ int TvService::ParserTvCommand(const char *commandData)
         }
     } else if (strcmp(temp, "hdmi") == 0) {
         LOGD("%s: hdmi cmd!\n", __FUNCTION__);
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: HDMI command detected, parsing moduleID\n", __FUNCTION__);
+        fflush(stdout);
+#endif
         temp = strtok(NULL, delimitation);
         int moduleID = atoi(temp);
+#ifdef STREAM_BOX_TRACE
+        printf("[TRACE] %s: Parsed moduleID=%d\n", __FUNCTION__, moduleID);
+        fflush(stdout);
+#endif
         if (moduleID == HDMI_GET_COLOR_FORMAT) {
             tvinSignalInfo = mpTv->GetCurrentSourceInfo();
             ret = tvinSignalInfo.cfmt;
@@ -295,17 +303,59 @@ int TvService::ParserTvCommand(const char *commandData)
         } else if (moduleID == HDMI_SET_ALLM_ENABLED) {
             temp = strtok(NULL, delimitation);
             int enable = atoi(temp);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: About to call mpTv->SetHdmiAllmEnabled(enable=%d)\n", __FUNCTION__, enable);
+            fflush(stdout);
+#endif
             ret = mpTv->SetHdmiAllmEnabled(enable);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Returned from mpTv->SetHdmiAllmEnabled(), ret=%d\n", __FUNCTION__, ret);
+            fflush(stdout);
+#endif
         } else if (moduleID == HDMI_GET_ALLM_ENABLED) {
             ret = mpTv->GetHdmiAllmEnabled();
         } else if (moduleID == HDMI_SET_VRR_ENABLED) {
             temp = strtok(NULL, delimitation);
             int enable = atoi(temp);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: About to call mpTv->SetHdmiVrrEnabled(enable=%d)\n", __FUNCTION__, enable);
+            fflush(stdout);
+#endif
             ret = mpTv->SetHdmiVrrEnabled(enable);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Returned from mpTv->SetHdmiVrrEnabled(), ret=%d\n", __FUNCTION__, ret);
+            fflush(stdout);
+#endif
         } else if (moduleID == HDMI_GET_VRR_ENABLED) {
             ret = mpTv->GetHdmiVrrEnabled();
         } else if (moduleID == HDMI_GET_VRR_MODE) {
             ret = mpTv->GetVrrMode();
+#ifdef STREAM_BOX
+        } else if (moduleID == HDMI_SET_GAME_MODE) {
+            temp = strtok(NULL, delimitation);
+            int enable = atoi(temp);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: About to call mpTv->SetGameMode(enable=%d)\n", __FUNCTION__, enable);
+            fflush(stdout);
+#endif
+            ret = mpTv->SetGameMode(enable);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Returned from mpTv->SetGameMode(), ret=%d\n", __FUNCTION__, ret);
+            fflush(stdout);
+#endif
+        } else if (moduleID == HDMI_SET_PC_MODE) {
+            temp = strtok(NULL, delimitation);
+            int enable = atoi(temp);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: About to call mpTv->SetPcMode(enable=%d)\n", __FUNCTION__, enable);
+            fflush(stdout);
+#endif
+            ret = mpTv->SetPcMode(enable);
+#ifdef STREAM_BOX_TRACE
+            printf("[TRACE] %s: Returned from mpTv->SetPcMode(), ret=%d\n", __FUNCTION__, ret);
+            fflush(stdout);
+#endif
+#endif
         } else {
             LOGD("%s: invalid hdmi cmd!\n", __FUNCTION__);
             ret = 0;

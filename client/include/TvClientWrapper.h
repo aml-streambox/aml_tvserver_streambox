@@ -93,6 +93,14 @@ extern tvin_color_range_t GetCurrentSourceColorRange(struct TvClientWrapper_t *p
 extern tvin_line_scan_mode_t GetCurrentSourceLineScanMode(struct TvClientWrapper_t *pTvClientWrapper);
 extern int GetSourceConnectStatus(struct TvClientWrapper_t *pTvClientWrapper, tv_source_input_t source);
 extern int SetEdidBoostOn(struct TvClientWrapper_t *pTvClientWrapper, int bBoostOn);
+#ifdef STREAM_BOX
+extern int SetHdmiAllmEnabled(struct TvClientWrapper_t *pTvClientWrapper, int enable);
+extern int GetHdmiAllmEnabled(struct TvClientWrapper_t *pTvClientWrapper);
+extern int SetHdmiVrrEnabled(struct TvClientWrapper_t *pTvClientWrapper, int enable);
+extern int GetHdmiVrrEnabled(struct TvClientWrapper_t *pTvClientWrapper);
+extern int SetGameMode(struct TvClientWrapper_t *pTvClientWrapper, int enable);
+extern int SetPcMode(struct TvClientWrapper_t *pTvClientWrapper, int enable);
+#endif
 #ifdef __cplusplus
 };
 #endif

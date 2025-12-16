@@ -105,10 +105,74 @@ int main(int argc, char **argv) {
 
     DisplayInit();
 #ifdef STREAM_BOX_TRACE
-    printf("[TRACE] hdmiin-demo: Returned from DisplayInit(), about to call StartTv()\n");
+    printf("[TRACE] hdmiin-demo: Returned from DisplayInit()\n");
     fflush(stdout);
 #endif
 
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: STREAM_BOX is defined, enabling ALLM/VRR before StartTv\n");
+    fflush(stdout);
+#endif
+
+#ifdef STREAM_BOX
+    // Enable ALLM (Auto Low Latency Mode) before StartTv
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to enable ALLM\n");
+    fflush(stdout);
+#endif
+    int ret = SetHdmiAllmEnabled(pTvClientWrapper, 1);
+    if (ret == 0) {
+        LOGD("ALLM enabled successfully\n");
+    } else {
+        LOGD("Failed to enable ALLM, ret=%d\n", ret);
+    }
+
+    // Enable VRR (Variable Refresh Rate) before StartTv
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to enable VRR\n");
+    fflush(stdout);
+#endif
+    ret = SetHdmiVrrEnabled(pTvClientWrapper, 1);
+    if (ret == 0) {
+        LOGD("VRR enabled successfully\n");
+    } else {
+        LOGD("Failed to enable VRR, ret=%d\n", ret);
+    }
+
+    // Force Game Mode for low latency (works even if source doesn't send ALLM)
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to enable Game Mode for low latency\n");
+    fflush(stdout);
+#endif
+    ret = SetGameMode(pTvClientWrapper, 1);
+    if (ret == 0) {
+        LOGD("Game Mode enabled successfully\n");
+    } else {
+        LOGD("Failed to enable Game Mode, ret=%d\n", ret);
+    }
+
+    // Force PC Mode for low latency passthrough
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to enable PC Mode for low latency\n");
+    fflush(stdout);
+#endif
+    ret = SetPcMode(pTvClientWrapper, 1);
+    if (ret == 0) {
+        LOGD("PC Mode enabled successfully\n");
+    } else {
+        LOGD("Failed to enable PC Mode, ret=%d\n", ret);
+    }
+#else
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: STREAM_BOX is NOT defined, skipping ALLM/VRR\n");
+    fflush(stdout);
+#endif
+#endif
+
+#ifdef STREAM_BOX_TRACE
+    printf("[TRACE] hdmiin-demo: About to call StartTv()\n");
+    fflush(stdout);
+#endif
     StartTv(pTvClientWrapper, CurrentSource);
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] hdmiin-demo: Returned from StartTv()\n");

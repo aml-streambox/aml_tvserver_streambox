@@ -46,6 +46,8 @@ enum tvcmd_e {
     HDMI_SET_VRR_ENABLED          = 115,
     HDMI_GET_VRR_ENABLED          = 116,
     HDMI_GET_VRR_MODE             = 117,
+    HDMI_SET_GAME_MODE            = 118,
+    HDMI_SET_PC_MODE              = 119,
     HDMI_SPD_INFO_GET             = 198,
     HDMI_CONTROL_CMD_MAX          = 199,
 };
