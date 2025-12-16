@@ -10,7 +10,13 @@ CFLAGS += -Wall -Wno-unknown-pragmas -Wno-format -Wno-format-security\
           -O3 -fexceptions -fnon-call-exceptions -D_GNU_SOURCE \
           -I$(STAGING_DIR)/usr/include -DHAVE_AUDIO
 
-LDFLAGS += -lbinder -llog -lubootenv
+LDFLAGS += -lbinder -llog
+# Conditionally link ubootenv library
+ifndef DISABLE_UBOOTENV
+LDFLAGS += -lubootenv
+else
+CFLAGS += -DDISABLE_UBOOTENV
+endif
 
 LDFLAGS += -L $(OUT_DIR)/
 

@@ -24,7 +24,9 @@
 #include <ctype.h>
 #include <sys/prctl.h>
 #include <stdlib.h>
+#ifndef DISABLE_UBOOTENV
 #include <ubootenv.h>
+#endif
 
 #include "tvutils.h"
 
@@ -216,14 +218,22 @@ int SaveDataToFile(char *fileName, int offset, int nsize, char *dataBuf)
 
 void UenvInit(void)
 {
+#ifdef DISABLE_UBOOTENV
+    LOGD("%s: ubootenv disabled at compile time\n", __FUNCTION__);
+#else
     int ret = bootenv_init();
     if (ret < 0) {
-    LOGD("%s: init uenv failed, ret = %d\n", __FUNCTION__, ret);
+        LOGD("%s: init uenv failed, ret = %d\n", __FUNCTION__, ret);
     }
+#endif
 }
 
 const char* GetUenv(const char *key)
 {
+#ifdef DISABLE_UBOOTENV
+    LOGD("%s: ubootenv disabled, returning NULL for key \"%s\"\n", __FUNCTION__, key);
+    return NULL;
+#else
     const char *buf = bootenv_get(key);
     if (buf) {
         LOGD("%s: (%s = %s)\n", __FUNCTION__, key, buf);
@@ -231,16 +241,22 @@ const char* GetUenv(const char *key)
         LOGD("%s: Can not read uboot env \"%s\".", __FUNCTION__, key);
     }
     return buf;
+#endif
 }
 
 int SetUenv (const char *name, const char *value)
 {
+#ifdef DISABLE_UBOOTENV
+    LOGD("%s: ubootenv disabled, ignoring set request (%s = %s)\n", __FUNCTION__, name, value);
+    return -1;
+#else
     int ret = -1;
     ret = bootenv_update(name, value);
     if (ret < 0) {
         LOGD("%s: (%s = %s) failed!", __FUNCTION__, name, value);
     } else {
         LOGD("%s: (%s = %s) success!", __FUNCTION__, name, value);
-        }
+    }
     return ret;
+#endif
 }
