@@ -10,7 +10,11 @@
 #ifndef _C_HDMI_RX_MANAGER_H_
 #define _C_HDMI_RX_MANAGER_H_
 
+#ifdef STREAM_BOX
+#include "hdmi_rx.h"
+#else
 #include <linux/amlogic/hdmi_rx.h>
+#endif
 
 #define CS_HDMIRX_DEV_PATH                "/dev/hdmirx0"
 #define HDMI_CEC_PORT_SEQUENCE            "/sys/class/cec/port_seq"

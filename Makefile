@@ -8,10 +8,12 @@ LOCAL_PATH = $(shell pwd)
 LDFLAGS += -Wl,--no-as-needed -lstdc++ -lpthread -lz -ldl -lrt -L$(STAGING_DIR)/usr/lib
 CFLAGS += -Wall -Wno-unknown-pragmas -Wno-format -Wno-format-security\
           -O3 -fexceptions -fnon-call-exceptions -D_GNU_SOURCE \
-          -I$(STAGING_DIR)/usr/include -DHAVE_AUDIO
+          -I$(STAGING_DIR)/usr/include -I$(LOCAL_PATH)/include/amlogic -DHAVE_AUDIO -DSTREAM_BOX
 
 LDFLAGS += -lbinder -llog
 # Conditionally link ubootenv library
+#define the DISABLE_UBOOTENV flag to disable the ubootenv library
+DISABLE_UBOOTENV := 1
 ifndef DISABLE_UBOOTENV
 LDFLAGS += -lubootenv
 else
@@ -68,9 +70,16 @@ tvtest_SRCS  = \
 	$(LOCAL_PATH)/test/main_tvtest.c \
 	$(NULL)
 
+################################################################################
+# hdmiin-demo - src files
+################################################################################
+hdmiin-demo_SRCS  = \
+	$(LOCAL_PATH)/test/hdmiin-demo.c \
+	$(NULL)
+
 # ---------------------------------------------------------------------
 #  Build rules
-BUILD_TARGETS = libtvclient.so libtv.so tvservice tvtest
+BUILD_TARGETS = libtvclient.so libtv.so tvservice tvtest hdmiin-demo
 BUILD_TARGETS_FULLPATH := $(patsubst %, $(OUT_DIR)/%, $(BUILD_TARGETS))
 
 .PHONY: all install clean
@@ -91,6 +100,10 @@ tvservice: $(tvservice_SRCS) libtv.so
 tvtest: $(tvtest_SRCS) libtvclient.so
 	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(LOCAL_PATH) \
 	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
+
+hdmiin-demo: $(hdmiin-demo_SRCS) libtvclient.so
+	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(LOCAL_PATH) \
+	-ltvclient $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 all: $(BUILD_TARGETS)
 

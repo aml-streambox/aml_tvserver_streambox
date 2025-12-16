@@ -9,7 +9,11 @@
 #ifndef __TV_COMMON_H__
 #define __TV_COMMON_H__
 
+#ifdef STREAM_BOX
+#include "tvin.h"
+#else
 #include <linux/amlogic/tvin.h>
+#endif
 
 #ifndef __TV_SOURCE_INPUT__
 #define __TV_SOURCE_INPUT__

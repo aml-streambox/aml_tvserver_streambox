@@ -9,7 +9,11 @@
 #ifndef _CAM_VIDEO_H
 #define _CAM_VIDEO_H
 
+#ifdef STREAM_BOX
+#include "amvideo.h"
+#else
 #include <linux/amlogic/amvideo.h>
+#endif
 
 #define AM_VIDEO_PATH           "/dev/amvideo"
 #define PATH_FRAME_COUNT_54     "/sys/module/aml_media/parameters/new_frame_count"
