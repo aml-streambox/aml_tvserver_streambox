@@ -108,6 +108,9 @@
 #define CFG_HDMI_EDID_FILE_PATH                 "edid.file.path"
 #define CFG_HDMI_EDID_AUTO_LOAD_EN              "edid.data.auto.load.en"
 #define CFG_HDMI_EDID_DEFAULT_VERSION           "edid.data.default.version"
+#ifdef STREAM_BOX
+#define CFG_HDMI_EDID_PASSTHROUGH_TX_TO_RX      "edid.passthrough.tx.to.rx"
+#endif
 
 
 #define CFG_DOLBY_MODULE                        "module.dolby.path"

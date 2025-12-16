@@ -73,6 +73,17 @@ CTv::CTv()
     SetCurrenSourceInfo(signalInfo);
 
     //EDID load
+#ifdef STREAM_BOX
+    int edidPassthroughEnable = ConfigGetInt(CFG_SECTION_HDMI, CFG_HDMI_EDID_PASSTHROUGH_TX_TO_RX, 0);
+    if (edidPassthroughEnable == 1) {
+        LOGD("%s: EDID passthrough from HDMI TX to RX enabled!\n", __FUNCTION__);
+        // Pass through EDID from HDMI TX to all HDMI RX ports
+        for (int port = 1; port < TVIN_PORT_ID_MAX; port++) {
+            mpHDMIRxManager->PassthroughEdidFromTxToRx(port);
+        }
+        LOGD("%s: EDID passthrough completed, skipping file-based EDID load\n", __FUNCTION__);
+    } else {
+#endif
     int edidAutoLoadEnable = ConfigGetInt(CFG_SECTION_HDMI, CFG_HDMI_EDID_AUTO_LOAD_EN, 1);
     if (edidAutoLoadEnable == 1) {
         LOGD("%s: EDID data load by tvserver!\n", __FUNCTION__);
@@ -98,6 +109,9 @@ CTv::CTv()
     } else {
         LOGD("%s: EDID data load by customer!\n", __FUNCTION__);
     }
+#ifdef STREAM_BOX
+    }
+#endif
     mTvDevicesPollDetect.setObserver(this);
     mTvDevicesPollDetect.startDetect();
     mTvMsgQueue = new CTvMsgQueue(this);
@@ -617,6 +631,12 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
                     REAL_EDID_DATA_SIZE,
                     edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE);
             LOGD("%s:File:%s\n", __FUNCTION__, edidFileName);
+#ifdef STREAM_BOX
+            // Patch EDID to enable 120Hz support
+            mpHDMIRxManager->PatchEdidFor120Hz(
+                (unsigned char *)(edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE),
+                REAL_EDID_DATA_SIZE);
+#endif
         }
     }
     int ret = mpHDMIRxManager->HdmiRxEdidDataSwitch(2 * K_PORT_NUM, edidLoadBuf);

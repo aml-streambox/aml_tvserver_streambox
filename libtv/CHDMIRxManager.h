@@ -24,6 +24,9 @@
 #define HDMI_EDID_DATA_DEV_PATH           "/sys/class/hdmirx/hdmirx0/edid_with_port"
 #define HDMI_SET_ALLM_PARAM               "/sys/class/hdmirx/hdmirx0/allm_func_ctrl"
 #define HDMI_VRR_ENABLED                  "/sys/class/hdmirx/hdmirx0/vrr_func_ctrl"
+#ifdef STREAM_BOX
+#define HDMI_TX_RAWEDID_PATH              "/sys/class/amhdmitx/amhdmitx0/rawedid"
+#endif
 
 #define REAL_EDID_DATA_SIZE        (256)
 
@@ -69,6 +72,11 @@ public:
     int GetAllmEnabled();
     int SetVrrEnabled(int enable);
     int GetVrrEnabled();
+#ifdef STREAM_BOX
+    int PatchEdidFor120Hz(unsigned char *edidData, int edidSize);
+    int ReadEdidFromHdmiTx(unsigned char *edidData, int maxSize);
+    int PassthroughEdidFromTxToRx(int port);
+#endif
 private:
     int mHdmiRxDeviceId;
 };
