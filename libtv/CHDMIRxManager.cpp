@@ -454,15 +454,236 @@ int CHDMIRxManager::PatchEdidFor120Hz(unsigned char *edidData, int edidSize)
         int dtdStart = edidData[extOffset + 2];
         if (dtdStart < 4) dtdStart = 4; // Minimum DTD start
         
-        // Try to add 120Hz timing in the data block area (before DTD start)
-        // For 1080p@120Hz, we can add a short video data block
-        // This is a simplified approach - proper implementation would add full timing descriptors
+        // Data block collection starts at offset 4 in CEA extension
+        int dataBlockOffset = extOffset + 4;
+        int dataBlockEnd = extOffset + dtdStart;
         
-        // Mark that we support high refresh rates by setting flags
-        // The actual timing modes should be in the detailed timing descriptors
+        // Parse existing data blocks to find video data block
+        int offset = dataBlockOffset;
+        int videoBlockOffset = -1;
+        int videoBlockLength = 0;
+        bool vic63Present = false;
         
-        LOGD("%s: EDID patched for 120Hz support (flags set, DTD start at %d)\n", 
-             __FUNCTION__, dtdStart);
+        while (offset < dataBlockEnd && offset < extOffset + 127) {
+            if (offset + 1 > extOffset + 127) break;
+            
+            unsigned char tag = (edidData[offset] >> 5) & 0x07;
+            unsigned char length = edidData[offset] & 0x1F;
+            
+            if (length == 0 || offset + length + 1 > extOffset + 127) {
+                break;
+            }
+            
+            // Check for video data block (tag 0x02 = VIDEO_TAG)
+            if (tag == 0x02) {
+                videoBlockOffset = offset;
+                videoBlockLength = length;
+                
+                // Check if VIC 63 (1080p@120Hz) is already present
+                for (int i = 1; i <= length && (offset + i) < extOffset + 127; i++) {
+                    if (edidData[offset + i] == 63) {
+                        vic63Present = true;
+                        LOGD("%s: VIC 63 (1080p@120Hz) already present in EDID\n", __FUNCTION__);
+                        break;
+                    }
+                }
+                break; // Found video block, no need to continue
+            }
+            
+            offset += length + 1;
+        }
+        
+        // Add VIC 63 (1080p@120Hz) if not present
+        if (!vic63Present) {
+            if (videoBlockOffset >= 0) {
+                // Video block exists, try to add VIC 63 to it
+                int newLength = videoBlockLength + 1;
+                if (videoBlockOffset + newLength + 1 <= dataBlockEnd && 
+                    videoBlockOffset + newLength + 1 <= extOffset + 127) {
+                    // Update length byte
+                    edidData[videoBlockOffset] = (edidData[videoBlockOffset] & 0xE0) | (newLength & 0x1F);
+                    // Add VIC 63
+                    edidData[videoBlockOffset + videoBlockLength + 1] = 63;
+                    LOGD("%s: Added VIC 63 (1080p@120Hz) to existing video data block at offset %d\n", 
+                         __FUNCTION__, videoBlockOffset);
+                } else {
+                    LOGD("%s: Video block full (length=%d, end=%d), cannot add VIC 63\n", 
+                         __FUNCTION__, videoBlockLength, dataBlockEnd);
+                }
+            } else {
+                // No video block exists, create one
+                // Check if we have space for a new video data block (tag + length + 1 VIC = 3 bytes)
+                if (offset + 3 <= dataBlockEnd && offset + 3 <= extOffset + 127) {
+                    // Create video data block: tag 0x02, length 1, VIC 63
+                    edidData[offset] = (0x02 << 5) | 0x01; // Tag 0x02, length 1
+                    edidData[offset + 1] = 63; // VIC 63 = 1080p@120Hz
+                    LOGD("%s: Created new video data block with VIC 63 (1080p@120Hz) at offset %d\n", 
+                         __FUNCTION__, offset);
+                    
+                    // Update DTD start if we added a block
+                    if (offset + 3 > dtdStart) {
+                        edidData[extOffset + 2] = offset + 3;
+                        dtdStart = offset + 3;
+                    }
+                } else {
+                    LOGD("%s: No space to add video data block for VIC 63 (offset=%d, end=%d)\n", 
+                         __FUNCTION__, offset, dataBlockEnd);
+                }
+            }
+        }
+        
+        // Add Detailed Timing Descriptor (DTD) for 2560x1440p@120Hz
+        // DTD is 18 bytes, we need space after current DTD start
+        // Check if we have space for a DTD (18 bytes) before the end of extension block
+        int dtdEnd = extOffset + 127; // Last byte before checksum
+        int dtdSpace = dtdEnd - dtdStart;
+        bool dtd1440p120Present = false;
+        
+        if (dtdSpace >= 18) {
+            // Check if 1440p@120Hz DTD already exists by checking pixel clock
+            // 2560x1440p@120Hz: pixel clock = 241.5 MHz * 2 = 483 MHz = 48300000 Hz
+            // In EDID DTD format: pixel clock in 10kHz units = 4830 = 0x12DE
+            for (int dtdOffset = dtdStart; dtdOffset + 18 <= dtdEnd; dtdOffset += 18) {
+                // Check if this DTD matches 2560x1440p@120Hz
+                // Pixel clock bytes: dtdOffset+0 (LSB), dtdOffset+1 (MSB)
+                unsigned int pixelClock = edidData[dtdOffset] | (edidData[dtdOffset + 1] << 8);
+                // Horizontal active pixels: dtdOffset+4 (LSB), dtdOffset+5 (MSB)
+                unsigned int hActive = ((edidData[dtdOffset + 4] >> 4) & 0xF) | (edidData[dtdOffset + 2] << 4);
+                // Vertical active lines: dtdOffset+7 (LSB), dtdOffset+8 (MSB)
+                unsigned int vActive = ((edidData[dtdOffset + 7] >> 4) & 0xF) | (edidData[dtdOffset + 5] << 4);
+                
+                // Check for 2560x1440p@120Hz: pixel clock ~4830 (10kHz units), 2560x1440
+                if (hActive == 2560 && vActive == 1440 && pixelClock >= 4800 && pixelClock <= 4900) {
+                    dtd1440p120Present = true;
+                    LOGD("%s: 2560x1440p@120Hz DTD already present at offset %d\n", __FUNCTION__, dtdOffset);
+                    break;
+                }
+            }
+            
+            if (!dtd1440p120Present) {
+                // Find first available DTD slot (18 bytes of zeros or unused)
+                int dtdOffset = dtdStart;
+                bool foundSlot = false;
+                
+                // Look for an empty DTD slot (all zeros or padding)
+                for (; dtdOffset + 18 <= dtdEnd; dtdOffset += 18) {
+                    bool isEmpty = true;
+                    for (int i = 0; i < 18; i++) {
+                        if (edidData[dtdOffset + i] != 0 && edidData[dtdOffset + i] != 0x01) {
+                            isEmpty = false;
+                            break;
+                        }
+                    }
+                    if (isEmpty) {
+                        foundSlot = true;
+                        break;
+                    }
+                }
+                
+                // If no empty slot, add at the end (before checksum)
+                if (!foundSlot && dtdOffset + 18 <= dtdEnd) {
+                    foundSlot = true;
+                }
+                
+                if (foundSlot) {
+                    // Create DTD for 2560x1440p@120Hz
+                    // Based on VESA timing for 2560x1440p@120Hz
+                    // Pixel clock: ~483.0 MHz = 48300 (10kHz units)
+                    // Horizontal: 2560 active, 2720 total (160 blank), 48 front porch, 32 sync
+                    // Vertical: 1440 active, 1481 total (41 blank), 3 front porch, 5 sync
+                    // Using timing parameters similar to 60Hz but with doubled pixel clock
+                    
+                    unsigned int pixelClock120 = 48300; // 483.0 MHz in 10kHz units for 120Hz
+                    unsigned int hActive = 2560;
+                    unsigned int hBlank = 160;  // 2720 - 2560
+                    unsigned int hTotal = 2720;
+                    unsigned int hFrontPorch = 48;
+                    unsigned int hSync = 32;
+                    unsigned int vActive = 1440;
+                    unsigned int vBlank = 41;   // 1481 - 1440
+                    unsigned int vTotal = 1481;
+                    unsigned int vFrontPorch = 3;
+                    unsigned int vSync = 5;
+                    
+                    // DTD format based on edid_dtd_parsing function:
+                    // Byte 0-1: pixel_clock (little endian, 10kHz units)
+                    edidData[dtdOffset + 0] = pixelClock120 & 0xFF;
+                    edidData[dtdOffset + 1] = (pixelClock120 >> 8) & 0xFF;
+                    
+                    // Byte 2: h_active upper 8 bits
+                    edidData[dtdOffset + 2] = (hActive >> 4) & 0xFF;
+                    
+                    // Byte 3: h_blank lower 8 bits
+                    edidData[dtdOffset + 3] = hBlank & 0xFF;
+                    
+                    // Byte 4: h_active lower 4 bits (bits 4-7) | h_blank upper 4 bits (bits 0-3)
+                    edidData[dtdOffset + 4] = ((hActive & 0xF) << 4) | ((hBlank >> 8) & 0xF);
+                    
+                    // v_active = (((data[7] >> 4) & 0xf) << 8) + data[5]
+                    // v_blank = ((data[7] & 0xf) << 8) + data[6]
+                    // So: data[5] = v_active lower 8 bits, data[7] bits 4-7 = v_active upper 4 bits
+                    //     data[6] = v_blank lower 8 bits, data[7] bits 0-3 = v_blank upper 4 bits
+                    
+                    // Byte 5: v_active lower 8 bits
+                    edidData[dtdOffset + 5] = vActive & 0xFF;
+                    
+                    // Byte 6: v_blank lower 8 bits
+                    edidData[dtdOffset + 6] = vBlank & 0xFF;
+                    
+                    // Byte 7: v_active upper 4 bits (bits 4-7) | v_blank upper 4 bits (bits 0-3)
+                    edidData[dtdOffset + 7] = (((vActive >> 8) & 0xF) << 4) | ((vBlank >> 8) & 0xF);
+                    
+                    // Byte 8: h_sync_offset lower 8 bits (front porch)
+                    edidData[dtdOffset + 8] = hFrontPorch & 0xFF;
+                    
+                    // Byte 9: h_sync lower 8 bits
+                    edidData[dtdOffset + 9] = hSync & 0xFF;
+                    
+                    // Byte 10: v_sync_offset lower 4 bits (bits 4-7) | v_sync lower 4 bits (bits 0-3)
+                    edidData[dtdOffset + 10] = ((vFrontPorch & 0xF) << 4) | (vSync & 0xF);
+                    
+                    // Byte 11: h_sync_offset upper 2 bits (bits 6-7) | h_sync upper 2 bits (bits 4-5) | 
+                    //          v_sync_offset upper 2 bits (bits 2-3) | v_sync upper 2 bits (bits 0-1)
+                    edidData[dtdOffset + 11] = ((hFrontPorch >> 8) & 0x3) << 6 |
+                                               ((hSync >> 8) & 0x3) << 4 |
+                                               ((vFrontPorch >> 4) & 0x3) << 2 |
+                                               ((vSync >> 4) & 0x3);
+                    
+                    // Byte 12-13: h_image_size, v_image_size (in mm, 0 = undefined)
+                    edidData[dtdOffset + 12] = 0x00;
+                    edidData[dtdOffset + 13] = 0x00;
+                    
+                    // Byte 14: h_image_size upper 4 bits (bits 4-7) | v_image_size upper 4 bits (bits 0-3)
+                    edidData[dtdOffset + 14] = 0x00;
+                    
+                    // Byte 15-16: horizontal/vertical border (in mm, typically 0)
+                    edidData[dtdOffset + 15] = 0x00;
+                    edidData[dtdOffset + 16] = 0x00;
+                    
+                    // Byte 17: flags
+                    // Bit 7: interlaced (0 = progressive)
+                    // Bit 6-5: stereo mode (00 = normal)
+                    // Bit 4: digital composite sync on green (0)
+                    // Bit 3: separate syncs (1 = yes)
+                    // Bit 2: sync on green (0)
+                    // Bit 1: vsync serration (0)
+                    // Bit 0: digital signal (1 = yes)
+                    edidData[dtdOffset + 17] = 0x1E; // Digital, separate syncs, progressive
+                    
+                    LOGD("%s: Added DTD for 2560x1440p@120Hz at offset %d (pixel clock=%d)\n", 
+                         __FUNCTION__, dtdOffset, pixelClock120);
+                } else {
+                    LOGD("%s: No space to add 1440p@120Hz DTD (dtdStart=%d, dtdEnd=%d)\n", 
+                         __FUNCTION__, dtdStart, dtdEnd);
+                }
+            }
+        } else {
+            LOGD("%s: Insufficient space for DTD (available=%d, needed=18)\n", __FUNCTION__, dtdSpace);
+        }
+        
+        LOGD("%s: EDID patched for 120Hz support (VIC63=%s, 1440p120DTD=%s, DTD start at %d)\n", 
+             __FUNCTION__, vic63Present ? "present" : "added", 
+             dtd1440p120Present ? "present" : "added", edidData[extOffset + 2]);
         
         // Recalculate checksum for the extension block
         unsigned char checksum = 0;
