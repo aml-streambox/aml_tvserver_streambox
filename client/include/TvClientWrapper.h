@@ -98,7 +98,7 @@ extern int SetHdmiAllmEnabled(struct TvClientWrapper_t *pTvClientWrapper, int en
 extern int GetHdmiAllmEnabled(struct TvClientWrapper_t *pTvClientWrapper);
 extern int SetHdmiVrrEnabled(struct TvClientWrapper_t *pTvClientWrapper, int enable);
 extern int GetHdmiVrrEnabled(struct TvClientWrapper_t *pTvClientWrapper);
-extern int SetGameMode(struct TvClientWrapper_t *pTvClientWrapper, int enable);
+extern int SetGameMode(struct TvClientWrapper_t *pTvClientWrapper, int enable, int game_mode_value);
 extern int SetPcMode(struct TvClientWrapper_t *pTvClientWrapper, int enable);
 #endif
 #ifdef __cplusplus

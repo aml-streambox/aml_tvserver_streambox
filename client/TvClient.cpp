@@ -602,11 +602,13 @@ vdin_vrr_mode_t TvClient::GetHdmiVrrMode()
 }
 
 #ifdef STREAM_BOX
-int TvClient::SetGameMode(bool enable)
+int TvClient::SetGameMode(bool enable, int game_mode_value)
 {
-    LOGD("%s: %s\n", __FUNCTION__, enable?"enable":"disable");
+    LOGD("%s: %s, game_mode_value=%d\n", __FUNCTION__, enable?"enable":"disable", game_mode_value);
     char buf[32] = {0};
-    sprintf(buf, "hdmi.%d.%d", HDMI_SET_GAME_MODE, enable?1:0);
+    /* Format: hdmi.118.<enable>.<game_mode_value> */
+    /* When disabled, pass 0. When enabled, pass game_mode_value (default 3 for VDIN_GAME_MODE_2) */
+    sprintf(buf, "hdmi.%d.%d.%d", HDMI_SET_GAME_MODE, enable?1:0, enable?game_mode_value:0);
     return SendMethodCall(buf);
 }
 

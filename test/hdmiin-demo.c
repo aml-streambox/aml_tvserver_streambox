@@ -266,11 +266,12 @@ int main(int argc, char **argv) {
     }
 
     // Force Game Mode for low latency (works even if source doesn't send ALLM)
+    // Use game_mode_value=3 to set VDIN_GAME_MODE_2 flag (required for VRR lock)
 #ifdef STREAM_BOX_TRACE
-    printf("[TRACE] hdmiin-demo: About to enable Game Mode for low latency\n");
+    printf("[TRACE] hdmiin-demo: About to enable Game Mode for low latency (game_mode_value=3 for VDIN_GAME_MODE_2)\n");
     fflush(stdout);
 #endif
-    ret = SetGameMode(pTvClientWrapper, 1);
+    ret = SetGameMode(pTvClientWrapper, 1, 3);
     if (ret == 0) {
         LOGD("Game Mode enabled successfully\n");
     } else {
@@ -278,16 +279,16 @@ int main(int argc, char **argv) {
     }
 
     // Force PC Mode for low latency passthrough
-#ifdef STREAM_BOX_TRACE
-    printf("[TRACE] hdmiin-demo: About to enable PC Mode for low latency\n");
-    fflush(stdout);
-#endif
-    ret = SetPcMode(pTvClientWrapper, 1);
-    if (ret == 0) {
-        LOGD("PC Mode enabled successfully\n");
-    } else {
-        LOGD("Failed to enable PC Mode, ret=%d\n", ret);
-    }
+//#ifdef STREAM_BOX_TRACE
+//    printf("[TRACE] hdmiin-demo: About to enable PC Mode for low latency\n");
+//    fflush(stdout);
+//#endif
+//    ret = SetPcMode(pTvClientWrapper, 1);
+//    if (ret == 0) {
+//        LOGD("PC Mode enabled successfully\n");
+//    } else {
+//        LOGD("Failed to enable PC Mode, ret=%d\n", ret);
+//    }
 #else
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] hdmiin-demo: STREAM_BOX is NOT defined, skipping ALLM/VRR\n");

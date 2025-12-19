@@ -1192,10 +1192,11 @@ int CTv::GetHdmiVrrEnabled()
 }
 
 #ifdef STREAM_BOX
-int CTv::SetGameMode(int enable)
+int CTv::SetGameMode(int enable, int game_mode_value)
 {
-    LOGD("%s: enable=%d\n", __FUNCTION__, enable);
-    return mpTvin->Tvin_SetGameMode(enable ? 1 : 0);
+    LOGD("%s: enable=%d, game_mode_value=%d\n", __FUNCTION__, enable, game_mode_value);
+    /* When disabled, pass 0. When enabled, pass game_mode_value (default 3 for VDIN_GAME_MODE_2) */
+    return mpTvin->Tvin_SetGameMode(enable ? game_mode_value : 0);
 }
 
 int CTv::SetPcMode(int enable)

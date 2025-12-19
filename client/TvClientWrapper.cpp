@@ -193,9 +193,9 @@ public:
         return mpTvClient->GetHdmiVrrEnabled() ? 1 : 0;
     }
 
-    int SetGameMode(int enable)
+    int SetGameMode(int enable, int game_mode_value = 3)
     {
-        return mpTvClient->SetGameMode(enable ? true : false);
+        return mpTvClient->SetGameMode(enable ? true : false, game_mode_value);
     }
 
     int SetPcMode(int enable)
@@ -442,9 +442,9 @@ int GetHdmiVrrEnabled(struct TvClientWrapper_t *pTvClientWrapper)
     return pTvClientWrapper->tvClientWrapper.GetHdmiVrrEnabled();
 }
 
-int SetGameMode(struct TvClientWrapper_t *pTvClientWrapper, int enable)
+int SetGameMode(struct TvClientWrapper_t *pTvClientWrapper, int enable, int game_mode_value)
 {
-    return pTvClientWrapper->tvClientWrapper.SetGameMode(enable);
+    return pTvClientWrapper->tvClientWrapper.SetGameMode(enable, game_mode_value);
 }
 
 int SetPcMode(struct TvClientWrapper_t *pTvClientWrapper, int enable)

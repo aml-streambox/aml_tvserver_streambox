@@ -334,11 +334,13 @@ int TvService::ParserTvCommand(const char *commandData)
         } else if (moduleID == HDMI_SET_GAME_MODE) {
             temp = strtok(NULL, delimitation);
             int enable = atoi(temp);
+            temp = strtok(NULL, delimitation);
+            int game_mode_value = (temp != NULL) ? atoi(temp) : 3; /* Default to 3 (VDIN_GAME_MODE_2) */
 #ifdef STREAM_BOX_TRACE
-            printf("[TRACE] %s: About to call mpTv->SetGameMode(enable=%d)\n", __FUNCTION__, enable);
+            printf("[TRACE] %s: About to call mpTv->SetGameMode(enable=%d, game_mode_value=%d)\n", __FUNCTION__, enable, game_mode_value);
             fflush(stdout);
 #endif
-            ret = mpTv->SetGameMode(enable);
+            ret = mpTv->SetGameMode(enable, game_mode_value);
 #ifdef STREAM_BOX_TRACE
             printf("[TRACE] %s: Returned from mpTv->SetGameMode(), ret=%d\n", __FUNCTION__, ret);
             fflush(stdout);

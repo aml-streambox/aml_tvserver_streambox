@@ -76,7 +76,7 @@ public:
     int SetHdmiVrrEnabled(int enable);
     int GetHdmiVrrEnabled();
 #ifdef STREAM_BOX
-    int SetGameMode(int enable);
+    int SetGameMode(int enable, int game_mode_value = 3);
     int SetPcMode(int enable);
 #endif
 
