@@ -27,6 +27,125 @@ static int WriteSysfs(const char *path, const char *cmd)
     return -1;
 }
 
+/* Read sysfs file and return value as string */
+static int ReadSysfs(const char *path, char *buf, size_t buf_size)
+{
+    int fd;
+    ssize_t bytes_read;
+
+    if (path == NULL || buf == NULL || buf_size == 0) {
+        return -1;
+    }
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return -1;
+    }
+
+    bytes_read = read(fd, buf, buf_size - 1);
+    close(fd);
+
+    if (bytes_read < 0) {
+        return -1;
+    }
+
+    buf[bytes_read] = '\0';
+    /* Remove trailing newline if present */
+    if (bytes_read > 0 && buf[bytes_read - 1] == '\n') {
+        buf[bytes_read - 1] = '\0';
+    }
+
+    return 0;
+}
+
+/* Read input_rate from vdin and parse to get actual framerate in Hz (as float) */
+static int GetVdinInputRate(float *input_rate_hz)
+{
+    const char *vdin_input_rate_path = "/sys/class/vdin/vdin0/input_rate";
+    char buf[64] = {0};
+    int ret;
+    int int_part, frac_part;
+    float rate;
+
+    if (input_rate_hz == NULL) {
+        return -1;
+    }
+
+    ret = ReadSysfs(vdin_input_rate_path, buf, sizeof(buf));
+    if (ret != 0) {
+        LOGD("%s: Failed to read input_rate from %s\n", __FUNCTION__, vdin_input_rate_path);
+        return -1;
+    }
+
+    /* Parse format: "XXX.XXX" (e.g., "119.880") */
+    ret = sscanf(buf, "%d.%d", &int_part, &frac_part);
+    if (ret != 2) {
+        LOGD("%s: Failed to parse input_rate: %s\n", __FUNCTION__, buf);
+        return -1;
+    }
+
+    /* Convert to Hz: int_part + frac_part/1000.0 */
+    rate = (float)int_part + (float)frac_part / 1000.0f;
+    *input_rate_hz = rate;
+
+    LOGD("%s: Read input_rate: %s -> %.3f Hz\n", __FUNCTION__, buf, rate);
+    return 0;
+}
+
+/* Determine frac_rate_policy based on actual input_rate vs rounded fps */
+static int DetermineFracRatePolicy(int rounded_fps, float actual_input_rate_hz)
+{
+    /* Fractional framerate thresholds:
+     * - 120Hz: if input_rate <= 119.88Hz -> use fractional (1)
+     * - 60Hz:  if input_rate <= 59.94Hz  -> use fractional (1)
+     * - 30Hz:  if input_rate <= 29.97Hz  -> use fractional (1)
+     * - 24Hz:  if input_rate <= 23.976Hz -> use fractional (1)
+     * Otherwise use perfect framerate (0)
+     */
+    int frac_rate_policy = 0;
+
+    switch (rounded_fps) {
+    case 120:
+        if (actual_input_rate_hz <= 119.88f) {
+            frac_rate_policy = 1;
+            LOGD("%s: Detected fractional framerate: %.3f Hz <= 119.88 Hz (for 120Hz)\n",
+                 __FUNCTION__, actual_input_rate_hz);
+        }
+        break;
+    case 60:
+        if (actual_input_rate_hz <= 59.94f) {
+            frac_rate_policy = 1;
+            LOGD("%s: Detected fractional framerate: %.3f Hz <= 59.94 Hz (for 60Hz)\n",
+                 __FUNCTION__, actual_input_rate_hz);
+        }
+        break;
+    case 30:
+        if (actual_input_rate_hz <= 29.97f) {
+            frac_rate_policy = 1;
+            LOGD("%s: Detected fractional framerate: %.3f Hz <= 29.97 Hz (for 30Hz)\n",
+                 __FUNCTION__, actual_input_rate_hz);
+        }
+        break;
+    case 24:
+        if (actual_input_rate_hz <= 23.976f) {
+            frac_rate_policy = 1;
+            LOGD("%s: Detected fractional framerate: %.3f Hz <= 23.976 Hz (for 24Hz)\n",
+                 __FUNCTION__, actual_input_rate_hz);
+        }
+        break;
+    default:
+        /* For other framerates, use perfect framerate (0) */
+        break;
+    }
+
+    if (frac_rate_policy == 0) {
+        LOGD("%s: Using perfect framerate (frac_rate_policy=0) for %dHz (actual: %.3f Hz)\n",
+             __FUNCTION__, rounded_fps, actual_input_rate_hz);
+    }
+
+    return frac_rate_policy;
+}
+
 /* Format hdmitx mode string from resolution and framerate */
 static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size_t mode_str_size, int fine_tune)
 {
@@ -116,6 +235,33 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     }
 #endif
 
+    /* Calculate rounded fps (same logic as FormatHdmitxMode) for frac_rate_policy determination */
+    int rounded_fps = rx_fps;
+    if (fine_tune_framerate) {
+        /* Fine-tune framerate to perfectly match rx framerate when VRR is not supported */
+        if (rx_fps >= 59 && rx_fps <= 60) {
+            rounded_fps = 60;
+        } else if (rx_fps >= 29 && rx_fps <= 30) {
+            rounded_fps = 30;
+        } else if (rx_fps >= 23 && rx_fps <= 24) {
+            rounded_fps = 24;
+        } else if (rx_fps >= 119 && rx_fps <= 120) {
+            rounded_fps = 120;
+        } else {
+            rounded_fps = (rx_fps + 1) / 2 * 2;
+            if (rounded_fps < rx_fps) rounded_fps = rx_fps;
+        }
+    } else {
+        /* With VRR support, use general framerate matching */
+        if (rx_fps >= 50 && rx_fps < 60) {
+            rounded_fps = 60;
+        } else if (rx_fps >= 100 && rx_fps < 120) {
+            rounded_fps = 120;
+        } else if (rx_fps >= 24 && rx_fps < 30) {
+            rounded_fps = 30;
+        }
+    }
+
     /* Format hdmitx mode string */
     char mode_str[64] = {0};
     int ret = FormatHdmitxMode(rx_width, rx_height, rx_fps, mode_str, sizeof(mode_str), fine_tune_framerate);
@@ -124,7 +270,35 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
         return;
     }
 
+    /* Read actual input_rate from vdin to determine if fractional framerate is needed */
+    float actual_input_rate_hz = 0.0f;
+    int frac_rate_policy = 0;
+    ret = GetVdinInputRate(&actual_input_rate_hz);
+    if (ret == 0) {
+        /* Successfully read input_rate, determine frac_rate_policy */
+        frac_rate_policy = DetermineFracRatePolicy(rounded_fps, actual_input_rate_hz);
+    } else {
+        /* Failed to read input_rate, default to perfect framerate (0) */
+        LOGD("%s: Failed to read input_rate, defaulting to perfect framerate (frac_rate_policy=0)\n", __FUNCTION__);
+        frac_rate_policy = 0;
+    }
+
     const char *hdmitx_disp_mode_path = "/sys/class/amhdmitx/amhdmitx0/disp_mode";
+    const char *hdmitx_frac_rate_policy_path = "/sys/class/amhdmitx/amhdmitx0/frac_rate_policy";
+
+    /* Set frac_rate_policy BEFORE setting disp_mode (required by driver) */
+    char frac_policy_str[2] = {0};
+    snprintf(frac_policy_str, sizeof(frac_policy_str), "%d", frac_rate_policy);
+    LOGD("%s: Setting frac_rate_policy to %d before setting disp_mode\n", __FUNCTION__, frac_rate_policy);
+    ret = WriteSysfs(hdmitx_frac_rate_policy_path, frac_policy_str);
+    if (ret != 0) {
+        LOGD("%s: Warning: Failed to set frac_rate_policy to %d (ret=%d), continuing anyway\n",
+             __FUNCTION__, frac_rate_policy, ret);
+    } else {
+        LOGD("%s: Successfully set frac_rate_policy to %d\n", __FUNCTION__, frac_rate_policy);
+        /* Small delay after setting frac_rate_policy */
+        usleep(10000); /* 10ms delay */
+    }
 
     /* Disable current mode before setting new mode (required by driver) */
     LOGD("%s: Disabling current hdmitx mode before setting new mode\n", __FUNCTION__);
@@ -139,7 +313,8 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     /* Set hdmitx output mode to match hdmirx input */
     ret = WriteSysfs(hdmitx_disp_mode_path, mode_str);
     if (ret == 0) {
-        LOGD("%s: Successfully set hdmitx mode to: %s\n", __FUNCTION__, mode_str);
+        LOGD("%s: Successfully set hdmitx mode to: %s (with frac_rate_policy=%d)\n",
+             __FUNCTION__, mode_str, frac_rate_policy);
     } else {
         LOGD("%s: Failed to set hdmitx mode to: %s (ret=%d)\n", __FUNCTION__, mode_str, ret);
     }
