@@ -120,9 +120,11 @@ clean:
 	rm -rf $(TARGET_DIR)/usr/lib/libtv.so
 	rm -rf $(TARGET_DIR)/usr/bin/tvtest
 	rm -rf $(TARGET_DIR)/usr/bin/tvservice
+	rm -rf $(TARGET_DIR)/usr/bin/hdmiin-demo
 
 install:
 	install -m 0644 $(OUT_DIR)/libtvclient.so $(TARGET_DIR)/usr/lib
 	install -m 0644 $(OUT_DIR)/libtv.so $(TARGET_DIR)/usr/lib/
 	install -m 0755 $(OUT_DIR)/tvservice $(TARGET_DIR)/usr/bin/
 	install -m 0755 $(OUT_DIR)/tvtest $(TARGET_DIR)/usr/bin/
+	install -m 0755 $(OUT_DIR)/hdmiin-demo $(TARGET_DIR)/usr/bin/

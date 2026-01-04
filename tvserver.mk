@@ -1,7 +1,7 @@
 TVSERVER_PROJDIR  := $(AML_COMMON_DIR)/tvserver
 TVSERVER_OSS_LIC  := CLOSED
 TVSERVER_DEPENDS  := audio_client libbinder
-TVSERVER_BINARIES := usr/lib/libtvclient.so usr/lib/libtv.so usr/bin/tvservice usr/bin/tvtest
+TVSERVER_BINARIES := usr/lib/libtvclient.so usr/lib/libtv.so usr/bin/tvservice usr/bin/tvtest usr/bin/hdmiin-demo
 TVSERVER_ADD_SRC  := $(ROKU_OS_INCLUDE_DIRS)
 
 $(eval $(call prep_proj,TVSERVER,tvserver,$(TVSERVER_PROJDIR),$(TVSERVER_ADD_SRC)))

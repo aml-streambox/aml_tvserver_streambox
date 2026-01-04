@@ -17,7 +17,7 @@
 #ifdef HAVE_AUDIO
 #include "CTvAudio.h"
 #endif
-#ifdef STREAM_BOX
+#ifdef 0
 #define CONFIG_FILE_PATH_DEF               "/etc/tvconfig/tvconfig.conf"
 #define DOLBY_VISION_TV_KO_PATH            "/usr/lib/modules/dovi_tv.ko"
 #define DOLBY_VISION_STB_KO_PATH           "/usr/lib/modules/dovi.ko"

@@ -529,7 +529,7 @@ int CTv::GetEDIDData(tv_source_input_t source, char *data)
     int port = (int)source - SOURCE_HDMI1 + 1;
     int edidVer = (GetEdidVersion(source) == HDMI_EDID_VER_20)?20:14;
     char dv_support[4] = {0};
-#ifdef STREAM_BOX
+#ifdef 0
     const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, "/etc/tvconfig/hdmi");
 #else
     const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, "/vendor/etc/tvconfig/hdmi");
@@ -592,7 +592,7 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
     tvin_port_t tvin_port = TVIN_PORT_NULL;
     ui_hdmi_port_id_t ui_port = UI_HDMI_PORT_ID_MAX;
     tv_source_input_t source_input;
-#ifdef STREAM_BOX
+#ifdef 0
     const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI, CFG_HDMI_EDID_FILE_PATH, "/etc/tvconfig/hdmi");
 #else
     const char *edidFilePath = ConfigGetStr(CFG_SECTION_HDMI,
