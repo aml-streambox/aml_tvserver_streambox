@@ -99,15 +99,15 @@ libtv.so: $(tv_SRCS)
 tvservice: $(tvservice_SRCS) libtv.so
 	$(CXX) $(CXXFLAGS) $(CFLAGS) $(LDFLAGS) -I$(tvclient_HEADERS) \
 	-I$(LOCAL_PATH)/libtv -I$(LOCAL_PATH)/libtv/tvutils \
-	-L$(LOCAL_PATH) -ltv -laudio_client -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
+	-L$(OUT_DIR) -ltv -laudio_client -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
 
 tvtest: $(tvtest_SRCS) libtvclient.so
-	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(LOCAL_PATH) \
+	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(OUT_DIR) \
 	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
 
 hdmiin-demo: $(hdmiin-demo_SRCS) libtvclient.so
-	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(LOCAL_PATH) \
-	-ltvclient $(LDFLAGS) -o $@ $^ $(LDLIBS)
+	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(OUT_DIR) \
+	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
 
 all: $(BUILD_TARGETS)
 
