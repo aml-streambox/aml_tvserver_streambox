@@ -83,7 +83,7 @@ hdmiin-demo_SRCS  = \
 
 # ---------------------------------------------------------------------
 #  Build rules
-BUILD_TARGETS = libtvclient.so libtv.so tvservice hdmiin-demo
+BUILD_TARGETS = libtvclient.so libtv.so tvservice tvtest hdmiin-demo
 BUILD_TARGETS_FULLPATH := $(patsubst %, $(OUT_DIR)/%, $(BUILD_TARGETS))
 
 .PHONY: all install clean
