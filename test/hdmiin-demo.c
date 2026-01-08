@@ -13,6 +13,9 @@
 static int run = 1;
 static struct TvClientWrapper_t *g_pTvClientWrapper = NULL;
 
+/* VRR force frame lock for HDMI passthrough low latency mode */
+#define VRR_DEBUG_PATH        "/sys/class/aml_vrr/vrr2/debug"
+
 static int WriteSysfs(const char *path, const char *cmd)
 {
     int fd;
@@ -315,6 +318,23 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     if (ret == 0) {
         LOGD("%s: Successfully set hdmitx mode to: %s (with frac_rate_policy=%d)\n",
              __FUNCTION__, mode_str, frac_rate_policy);
+
+        /* Wait for HDMI TX to stabilize after mode change */
+        usleep(200000); /* 200ms delay for TX to stabilize */
+
+        /* Enable force VRR frame lock for low latency HDMI passthrough */
+        LOGD("%s: Enabling force VRR frame lock mode\n", __FUNCTION__);
+        ret = WriteSysfs(VRR_DEBUG_PATH, "mode 1");
+        if (ret == 0) {
+            ret = WriteSysfs(VRR_DEBUG_PATH, "en 1");
+            if (ret == 0) {
+                LOGD("%s: Force VRR frame lock enabled successfully\n", __FUNCTION__);
+            } else {
+                LOGD("%s: Failed to enable VRR (ret=%d)\n", __FUNCTION__, ret);
+            }
+        } else {
+            LOGD("%s: Failed to set VRR mode (ret=%d)\n", __FUNCTION__, ret);
+        }
     } else {
         LOGD("%s: Failed to set hdmitx mode to: %s (ret=%d)\n", __FUNCTION__, mode_str, ret);
     }

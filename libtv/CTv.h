@@ -33,6 +33,9 @@
 #define VIDEO_SYNC_MODE     "/sys/class/tsync/mode"
 //0 means do AV sync, 1 means don't do AV sync,just free run.
 #define VIDEO_FREERUN_MODE    "/sys/class/video/freerun_mode"
+
+// VRR force frame lock for HDMI passthrough low latency mode
+#define VRR_DEBUG_PATH        "/sys/class/aml_vrr/vrr2/debug"
 class CTv : public CTvDevicesPollDetect::ISourceConnectObserver {
 public:
     class TvIObserver {
@@ -78,6 +81,7 @@ public:
 #ifdef STREAM_BOX
     int SetGameMode(int enable, int game_mode_value = 3);
     int SetPcMode(int enable);
+    int SetForceVrrFrameLock(int enable);
 #endif
 
 private:

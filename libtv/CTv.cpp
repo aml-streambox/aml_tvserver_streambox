@@ -932,7 +932,6 @@ void CTv::onSigToStable()
 
 void CTv::onSigToUnstable()
 {
-
     mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
     mpTvin->Tvin_StopDecoder();
 
@@ -1203,6 +1202,31 @@ int CTv::SetPcMode(int enable)
 {
     LOGD("%s: enable=%d\n", __FUNCTION__, enable);
     return mpTvin->Tvin_SetPcMode(enable ? 1 : 0);
+}
+
+int CTv::SetForceVrrFrameLock(int enable)
+{
+    LOGD("%s: enable=%d\n", __FUNCTION__, enable);
+    int ret = 0;
+
+    if (enable) {
+        // Enable low latency frame lock mode first, then enable VRR
+        ret = tvWriteSysfs(VRR_DEBUG_PATH, "mode 1");
+        if (ret >= 0) {
+            ret = tvWriteSysfs(VRR_DEBUG_PATH, "en 1");
+        }
+    } else {
+        // Disable VRR, then disable low latency frame lock mode
+        ret = tvWriteSysfs(VRR_DEBUG_PATH, "en 0");
+        if (ret >= 0) {
+            ret = tvWriteSysfs(VRR_DEBUG_PATH, "mode 0");
+        }
+    }
+
+    if (ret < 0) {
+        LOGE("%s: Failed to %s force VRR frame lock\n", __FUNCTION__, enable ? "enable" : "disable");
+    }
+    return ret;
 }
 #endif
 
