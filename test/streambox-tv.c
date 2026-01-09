@@ -8,6 +8,10 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <getopt.h>
+#include <sys/socket.h>
+#include <linux/netlink.h>
+#include <poll.h>
+#include <pthread.h>
 #include <TvClientWrapper.h>
 #include <CTvClientLog.h>
 
@@ -20,6 +24,16 @@ static int g_trace_level = 0;    /* 0=off, 1=low, 2=medium, 3=high */
 
 /* VRR force frame lock for HDMI passthrough low latency mode */
 #define VRR_DEBUG_PATH        "/sys/class/aml_vrr/vrr2/debug"
+
+/* HDMI TX HPD state sysfs path */
+#define HDMI_TX_HPD_STATE_PATH "/sys/class/amhdmitx/amhdmitx0/hpd_state"
+
+/* HDMI TX HPD monitoring state */
+static int g_hdmitx_connected = 0;   /* 0=disconnected, 1=connected */
+static int g_tv_started = 0;         /* 0=stopped, 1=started */
+static int g_uevent_fd = -1;         /* Netlink socket for uevent */
+static pthread_t g_uevent_thread;    /* Uevent monitor thread */
+static tv_source_input_t g_current_source = SOURCE_HDMI2;
 
 /* Trace macro - runtime controlled */
 #define TRACE(level, fmt, ...) do { \
@@ -97,6 +111,164 @@ static int ReadSysfs(const char *path, char *buf, size_t buf_size)
     }
 
     return 0;
+}
+
+/* Read HDMI TX HPD state: returns 1 if connected, 0 if disconnected, -1 on error */
+static int GetHdmiTxHpdState(void)
+{
+    char buf[16] = {0};
+    int ret = ReadSysfs(HDMI_TX_HPD_STATE_PATH, buf, sizeof(buf));
+    if (ret != 0) {
+        return -1;
+    }
+    return (atoi(buf) == 1) ? 1 : 0;
+}
+
+/* Create netlink socket for uevent monitoring */
+static int CreateUeventSocket(void)
+{
+    struct sockaddr_nl addr;
+    int fd;
+
+    fd = socket(PF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+    if (fd < 0) {
+        LOGD("Failed to create uevent socket\n");
+        return -1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.nl_family = AF_NETLINK;
+    addr.nl_pid = getpid();
+    addr.nl_groups = 1; /* Receive broadcast messages */
+
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        LOGD("Failed to bind uevent socket\n");
+        close(fd);
+        return -1;
+    }
+
+    return fd;
+}
+
+/* Parse uevent for hdmitx_hpd event, returns: 0=disconnect, 1=connect, -1=not HPD event */
+static int ParseHdmiTxHpdEvent(const char *buf, int len)
+{
+    const char *ptr = buf;
+    const char *end = buf + len;
+
+    /* Look for hdmitx_hpd= in the uevent data */
+    while (ptr < end) {
+        if (strncmp(ptr, "hdmitx_hpd=", 11) == 0) {
+            int state = atoi(ptr + 11);
+            LOGD("Received HDMI TX HPD event: hdmitx_hpd=%d\n", state);
+            return state;
+        }
+        ptr += strlen(ptr) + 1;
+    }
+    return -1; /* Not an HPD event */
+}
+
+/* Start TV processing - configure and start HDMI input */
+static void StartTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
+{
+    if (g_tv_started) {
+        LOGD("%s: TV already started\n", __FUNCTION__);
+        return;
+    }
+
+    LOGD("%s: Starting TV processing\n", __FUNCTION__);
+
+#ifdef STREAM_BOX
+    if (g_game_mode > 0) {
+        int ret;
+
+        /* Enable ALLM (Auto Low Latency Mode) */
+        ret = SetHdmiAllmEnabled(pTvClientWrapper, 1);
+        if (ret == 0) {
+            LOGD("ALLM enabled successfully\n");
+        } else {
+            LOGD("Failed to enable ALLM, ret=%d\n", ret);
+        }
+
+        /* Enable VRR (Variable Refresh Rate) */
+        ret = SetHdmiVrrEnabled(pTvClientWrapper, 1);
+        if (ret == 0) {
+            LOGD("VRR enabled successfully\n");
+        } else {
+            LOGD("Failed to enable VRR, ret=%d\n", ret);
+        }
+
+        /* Set Game Mode */
+        int game_mode_value = (g_game_mode == 2) ? 3 : 1;
+        ret = SetGameMode(pTvClientWrapper, 1, game_mode_value);
+        if (ret == 0) {
+            LOGD("Game Mode enabled successfully (game_mode_value=%d)\n", game_mode_value);
+        } else {
+            LOGD("Failed to enable Game Mode, ret=%d\n", ret);
+        }
+    }
+#endif
+
+    StartTv(pTvClientWrapper, g_current_source);
+    g_tv_started = 1;
+    LOGD("%s: TV processing started\n", __FUNCTION__);
+}
+
+/* Stop TV processing */
+static void StopTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
+{
+    if (!g_tv_started) {
+        LOGD("%s: TV already stopped\n", __FUNCTION__);
+        return;
+    }
+
+    LOGD("%s: Stopping TV processing\n", __FUNCTION__);
+
+    /* Disable VRR force mode */
+    if (g_game_mode == 2) {
+        WriteSysfs(VRR_DEBUG_PATH, "en 0");
+    }
+
+    StopTv(pTvClientWrapper, g_current_source);
+    g_tv_started = 0;
+    LOGD("%s: TV processing stopped\n", __FUNCTION__);
+}
+
+/* Uevent monitor thread */
+static void *UeventMonitorThread(void *arg)
+{
+    struct TvClientWrapper_t *pTvClientWrapper = (struct TvClientWrapper_t *)arg;
+    char buf[4096];
+    struct pollfd pfd;
+
+    pfd.fd = g_uevent_fd;
+    pfd.events = POLLIN;
+
+    LOGD("Uevent monitor thread started\n");
+
+    while (run) {
+        int ret = poll(&pfd, 1, 1000); /* 1 second timeout */
+        if (ret > 0 && (pfd.revents & POLLIN)) {
+            int len = recv(g_uevent_fd, buf, sizeof(buf) - 1, 0);
+            if (len > 0) {
+                buf[len] = '\0';
+                int hpd_state = ParseHdmiTxHpdEvent(buf, len);
+                if (hpd_state >= 0 && hpd_state != g_hdmitx_connected) {
+                    g_hdmitx_connected = hpd_state;
+                    if (hpd_state == 1) {
+                        LOGD("HDMI TX connected (event), starting TV\n");
+                        StartTvProcessing(pTvClientWrapper);
+                    } else {
+                        LOGD("HDMI TX disconnected (event), stopping TV\n");
+                        StopTvProcessing(pTvClientWrapper);
+                    }
+                }
+            }
+        }
+    }
+
+    LOGD("Uevent monitor thread exiting\n");
+    return NULL;
 }
 
 /* Read input_rate from vdin and parse to get actual framerate in Hz (as float) */
@@ -473,79 +645,98 @@ int main(int argc, char **argv) {
     printf("streambox-tv starting with: game_mode=%d, trace_level=%d\n", g_game_mode, g_trace_level);
 
     TRACE(1, "main() ENTRY\n");
+
+    /* Create uevent socket for HPD monitoring */
+    g_uevent_fd = CreateUeventSocket();
+    if (g_uevent_fd < 0) {
+        LOGD("Warning: Failed to create uevent socket, will use polling fallback\n");
+    } else {
+        LOGD("Uevent socket created successfully\n");
+    }
+
+    /* Check initial HDMI TX state */
+    g_hdmitx_connected = (GetHdmiTxHpdState() == 1);
+    LOGD("Initial HDMI TX state: %s\n", g_hdmitx_connected ? "connected" : "disconnected");
+
+    /* Wait for HDMI TX connection if not connected */
+    if (!g_hdmitx_connected) {
+        LOGD("Waiting for HDMI TX connection...\n");
+        while (run && !g_hdmitx_connected) {
+            if (g_uevent_fd >= 0) {
+                /* Wait for uevent */
+                struct pollfd pfd = { .fd = g_uevent_fd, .events = POLLIN };
+                if (poll(&pfd, 1, 500) > 0 && (pfd.revents & POLLIN)) {
+                    char buf[4096];
+                    int len = recv(g_uevent_fd, buf, sizeof(buf) - 1, 0);
+                    if (len > 0) {
+                        buf[len] = '\0';
+                        if (ParseHdmiTxHpdEvent(buf, len) == 1) {
+                            g_hdmitx_connected = 1;
+                        }
+                    }
+                }
+            } else {
+                /* Fallback to polling */
+                usleep(500000);
+                g_hdmitx_connected = (GetHdmiTxHpdState() == 1);
+            }
+        }
+        if (!run) goto cleanup;
+        LOGD("HDMI TX connected, proceeding with initialization\n");
+    }
+
+    /* Initialize TV client */
     TRACE(2, "About to call GetInstance()\n");
-    struct TvClientWrapper_t * pTvClientWrapper = GetInstance();
-    g_pTvClientWrapper = pTvClientWrapper; /* Store for use in event callback */
+    struct TvClientWrapper_t *pTvClientWrapper = GetInstance();
+    g_pTvClientWrapper = pTvClientWrapper;
     TRACE(2, "Returned from GetInstance(), pTvClientWrapper = %p\n", pTvClientWrapper);
 
     TRACE(2, "About to call setTvEventCallback()\n");
     setTvEventCallback(TvEventCallback);
 
-    TRACE(2, "About to call StopTv(SOURCE_HDMI2)\n");
-    tv_source_input_t CurrentSource = SOURCE_HDMI2;
-	StopTv(pTvClientWrapper, CurrentSource);
+    TRACE(2, "About to call StopTv()\n");
+    StopTv(pTvClientWrapper, g_current_source);
     TRACE(2, "Returned from StopTv()\n");
 
     TRACE(3, "About to sleep(1)\n");
-	sleep(1);
-    TRACE(3, "Woke up from sleep, about to call DisplayInit()\n");
+    sleep(1);
 
     DisplayInit();
     TRACE(2, "Returned from DisplayInit()\n");
 
-#ifdef STREAM_BOX
-    /* Configure based on game_mode setting */
-    if (g_game_mode > 0) {
-        int ret;
+    /* Start TV processing */
+    StartTvProcessing(pTvClientWrapper);
 
-        // Enable ALLM (Auto Low Latency Mode) before StartTv
-        TRACE(2, "About to enable ALLM\n");
-        ret = SetHdmiAllmEnabled(pTvClientWrapper, 1);
-        if (ret == 0) {
-            LOGD("ALLM enabled successfully\n");
+    /* Start uevent monitor thread for HPD changes */
+    if (g_uevent_fd >= 0) {
+        if (pthread_create(&g_uevent_thread, NULL, UeventMonitorThread, pTvClientWrapper) != 0) {
+            LOGD("Failed to create uevent monitor thread\n");
         } else {
-            LOGD("Failed to enable ALLM, ret=%d\n", ret);
+            LOGD("Uevent monitor thread started\n");
         }
-
-        // Enable VRR (Variable Refresh Rate) before StartTv
-        TRACE(2, "About to enable VRR\n");
-        ret = SetHdmiVrrEnabled(pTvClientWrapper, 1);
-        if (ret == 0) {
-            LOGD("VRR enabled successfully\n");
-        } else {
-            LOGD("Failed to enable VRR, ret=%d\n", ret);
-        }
-
-        // Set Game Mode based on configuration
-        // game_mode=1: game_mode_value=1 (VDIN_GAME_MODE_1)
-        // game_mode=2: game_mode_value=3 (VDIN_GAME_MODE_2, required for VRR lock)
-        int game_mode_value = (g_game_mode == 2) ? 3 : 1;
-        TRACE(2, "About to enable Game Mode (game_mode=%d, game_mode_value=%d)\n", g_game_mode, game_mode_value);
-        ret = SetGameMode(pTvClientWrapper, 1, game_mode_value);
-        if (ret == 0) {
-            LOGD("Game Mode enabled successfully (game_mode_value=%d)\n", game_mode_value);
-        } else {
-            LOGD("Failed to enable Game Mode, ret=%d\n", ret);
-        }
-    } else {
-        TRACE(1, "Game mode disabled (game_mode=%d), skipping ALLM/VRR/GameMode setup\n", g_game_mode);
-        LOGD("Game mode disabled, ALLM/VRR/GameMode not configured\n");
     }
-#else
-    TRACE(1, "STREAM_BOX is NOT defined, skipping ALLM/VRR\n");
-#endif
 
-    TRACE(2, "About to call StartTv()\n");
-    StartTv(pTvClientWrapper, CurrentSource);
-    TRACE(2, "Returned from StartTv()\n");
-
-	signal(SIGINT, signal_handler);
+    signal(SIGINT, signal_handler);
 
     TRACE(1, "Entering main loop\n");
-	while (run)
-	{
-		sleep(1);
-	}
+    while (run) {
+        sleep(1);
+    }
+
+cleanup:
+    TRACE(1, "main() cleanup\n");
+
+    /* Wait for uevent monitor thread to exit */
+    if (g_uevent_fd >= 0) {
+        pthread_join(g_uevent_thread, NULL);
+        close(g_uevent_fd);
+        g_uevent_fd = -1;
+    }
+
+    /* Stop TV if still running */
+    if (g_tv_started && g_pTvClientWrapper) {
+        StopTvProcessing(g_pTvClientWrapper);
+    }
 
     TRACE(1, "main() EXIT\n");
     return 0;
