@@ -81,9 +81,16 @@ hdmiin-demo_SRCS  = \
 	$(LOCAL_PATH)/test/hdmiin-demo.c \
 	$(NULL)
 
+################################################################################
+# streambox-tv - src files
+################################################################################
+streambox-tv_SRCS  = \
+	$(LOCAL_PATH)/test/streambox-tv.c \
+	$(NULL)
+
 # ---------------------------------------------------------------------
 #  Build rules
-BUILD_TARGETS = libtvclient.so libtv.so tvservice tvtest hdmiin-demo
+BUILD_TARGETS = libtvclient.so libtv.so tvservice tvtest hdmiin-demo streambox-tv
 BUILD_TARGETS_FULLPATH := $(patsubst %, $(OUT_DIR)/%, $(BUILD_TARGETS))
 
 .PHONY: all install clean
@@ -109,6 +116,10 @@ hdmiin-demo: $(hdmiin-demo_SRCS) libtvclient.so
 	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(OUT_DIR) \
 	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
 
+streambox-tv: $(streambox-tv_SRCS) libtvclient.so
+	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(OUT_DIR) \
+	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
+
 all: $(BUILD_TARGETS)
 
 clean:
@@ -121,6 +132,7 @@ clean:
 	rm -rf $(TARGET_DIR)/usr/bin/tvtest
 	rm -rf $(TARGET_DIR)/usr/bin/tvservice
 	rm -rf $(TARGET_DIR)/usr/bin/hdmiin-demo
+	rm -rf $(TARGET_DIR)/usr/bin/streambox-tv
 
 install:
 	install -m 0644 $(OUT_DIR)/libtvclient.so $(TARGET_DIR)/usr/lib
@@ -128,3 +140,4 @@ install:
 	install -m 0755 $(OUT_DIR)/tvservice $(TARGET_DIR)/usr/bin/
 	install -m 0755 $(OUT_DIR)/tvtest $(TARGET_DIR)/usr/bin/
 	install -m 0755 $(OUT_DIR)/hdmiin-demo $(TARGET_DIR)/usr/bin/
+	install -m 0755 $(OUT_DIR)/streambox-tv $(TARGET_DIR)/usr/bin/
