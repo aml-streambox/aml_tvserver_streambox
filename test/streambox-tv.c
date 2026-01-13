@@ -12,6 +12,8 @@
 #include <linux/netlink.h>
 #include <poll.h>
 #include <pthread.h>
+#include <errno.h>
+#include <sys/wait.h>
 #include <TvClientWrapper.h>
 #include <CTvClientLog.h>
 
@@ -34,6 +36,67 @@ static int g_tv_started = 0;         /* 0=stopped, 1=started */
 static int g_uevent_fd = -1;         /* Netlink socket for uevent */
 static pthread_t g_uevent_thread;    /* Uevent monitor thread */
 static tv_source_input_t g_current_source = SOURCE_HDMI2;
+
+/* Audio passthrough (alsaloop) process management */
+static pid_t g_alsaloop_pid = -1;    /* PID of running alsaloop process, -1 if not running */
+
+/* Start ALSA audio passthrough from HDMI RX to HDMI TX */
+static void StartAudioPassthrough(void)
+{
+    if (g_alsaloop_pid > 0) {
+        LOGD("%s: alsaloop already running (pid=%d)\n", __FUNCTION__, g_alsaloop_pid);
+        return;
+    }
+
+    LOGD("%s: Starting audio passthrough (alsaloop)\n", __FUNCTION__);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOGD("%s: fork() failed: %s\n", __FUNCTION__, strerror(errno));
+        return;
+    } else if (pid == 0) {
+        /* Child process - execute alsaloop */
+        /* alsaloop -C hw:0,2 -P hw:0,0 -t 10000 -f S16_LE -c 2 -r 48000 */
+        execlp("alsaloop", "alsaloop",
+               "-C", "hw:0,2",   /* Capture device (HDMI RX) */
+               "-P", "hw:0,0",   /* Playback device (HDMI TX) */
+               "-t", "10000",    /* Latency in microseconds */
+               "-f", "S16_LE",   /* Sample format */
+               "-c", "2",        /* Channels */
+               "-r", "48000",    /* Sample rate */
+               NULL);
+        /* If execlp returns, it failed */
+        LOGD("%s: execlp(alsaloop) failed: %s\n", __FUNCTION__, strerror(errno));
+        _exit(1);
+    } else {
+        /* Parent process */
+        g_alsaloop_pid = pid;
+        LOGD("%s: alsaloop started with pid=%d\n", __FUNCTION__, g_alsaloop_pid);
+    }
+}
+
+/* Stop ALSA audio passthrough */
+static void StopAudioPassthrough(void)
+{
+    if (g_alsaloop_pid <= 0) {
+        LOGD("%s: alsaloop not running\n", __FUNCTION__);
+        return;
+    }
+
+    LOGD("%s: Stopping audio passthrough (pid=%d)\n", __FUNCTION__, g_alsaloop_pid);
+
+    /* Send SIGTERM to alsaloop */
+    if (kill(g_alsaloop_pid, SIGTERM) == 0) {
+        /* Wait for process to exit */
+        int status;
+        waitpid(g_alsaloop_pid, &status, 0);
+        LOGD("%s: alsaloop terminated (status=%d)\n", __FUNCTION__, status);
+    } else {
+        LOGD("%s: kill() failed: %s\n", __FUNCTION__, strerror(errno));
+    }
+
+    g_alsaloop_pid = -1;
+}
 
 /* Trace macro - runtime controlled */
 #define TRACE(level, fmt, ...) do { \
@@ -217,6 +280,9 @@ static void StartTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
 /* Stop TV processing */
 static void StopTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
 {
+    /* Stop audio passthrough first */
+    StopAudioPassthrough();
+
     if (!g_tv_started) {
         LOGD("%s: TV already stopped\n", __FUNCTION__);
         return;
@@ -578,10 +644,18 @@ static void TvEventCallback(event_type_t eventType, void *eventData)
                                                    signalDetectEvent->SignalStatus,
                                                    signalDetectEvent->isDviSignal);
 
-        /* When hdmirx input change event received and signal is stable, synchronize hdmitx */
+        /* When hdmirx input change event received and signal is stable, synchronize hdmitx and start audio */
         if (signalDetectEvent->SignalStatus == TVIN_SIG_STATUS_STABLE && g_pTvClientWrapper != NULL) {
             LOGD("%s: HDMIRX input change detected (stable signal), synchronizing HDMITX\n", __FUNCTION__);
             SynchronizeHdmitxToHdmirx(g_pTvClientWrapper);
+
+            /* Start audio passthrough now that signal is stable */
+            StartAudioPassthrough();
+        } else if (signalDetectEvent->SignalStatus != TVIN_SIG_STATUS_STABLE) {
+            /* Signal is not stable (unstable, no signal, etc.) - stop audio passthrough */
+            LOGD("%s: HDMIRX signal not stable (status=%d), stopping audio passthrough\n",
+                 __FUNCTION__, signalDetectEvent->SignalStatus);
+            StopAudioPassthrough();
         }
     } else if (eventType == TV_EVENT_TYPE_SOURCE_CONNECT) {
         SourceConnectCallback_t *sourceConnectEvent = (SourceConnectCallback_t *)(eventData);
