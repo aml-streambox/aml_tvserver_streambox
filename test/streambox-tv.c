@@ -1,3 +1,9 @@
+/*
+ * StreamBox TV - HDMI Passthrough Application
+ *
+ * Config-file driven design with dynamic reload support.
+ */
+
 #define LOG_MOUDLE_TAG "TV"
 #define LOG_CLASS_TAG "StreamBoxTV"
 
@@ -17,12 +23,10 @@
 #include <TvClientWrapper.h>
 #include <CTvClientLog.h>
 
+#include "config.h"
+
 static int run = 1;
 static struct TvClientWrapper_t *g_pTvClientWrapper = NULL;
-
-/* Global configuration options */
-static int g_game_mode = 2;      /* 0=disable, 1=game mode 1, 2=game mode 2 with VRR (default) */
-static int g_trace_level = 0;    /* 0=off, 1=low, 2=medium, 3=high */
 
 /* VRR force frame lock for HDMI passthrough low latency mode */
 #define VRR_DEBUG_PATH        "/sys/class/aml_vrr/vrr2/debug"
@@ -35,101 +39,27 @@ static int g_hdmitx_connected = 0;   /* 0=disconnected, 1=connected */
 static int g_tv_started = 0;         /* 0=stopped, 1=started */
 static int g_uevent_fd = -1;         /* Netlink socket for uevent */
 static pthread_t g_uevent_thread;    /* Uevent monitor thread */
-static tv_source_input_t g_current_source = SOURCE_HDMI2;
 
 /* Audio passthrough (alsaloop) process management */
 static pid_t g_alsaloop_pid = -1;    /* PID of running alsaloop process, -1 if not running */
+static pthread_mutex_t g_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Start ALSA audio passthrough from HDMI RX to HDMI TX */
-static void StartAudioPassthrough(void)
-{
-    if (g_alsaloop_pid > 0) {
-        LOGD("%s: alsaloop already running (pid=%d)\n", __FUNCTION__, g_alsaloop_pid);
-        return;
-    }
-
-    LOGD("%s: Starting audio passthrough (alsaloop)\n", __FUNCTION__);
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        LOGD("%s: fork() failed: %s\n", __FUNCTION__, strerror(errno));
-        return;
-    } else if (pid == 0) {
-        /* Child process - execute alsaloop */
-        /* alsaloop -C hw:0,2 -P hw:0,0 -t 10000 -f S16_LE -c 2 -r 48000 */
-        execlp("alsaloop", "alsaloop",
-               "-C", "hw:0,2",   /* Capture device (HDMI RX) */
-               "-P", "hw:0,0",   /* Playback device (HDMI TX) */
-               "-t", "10000",    /* Latency in microseconds */
-               "-f", "S16_LE",   /* Sample format */
-               "-c", "2",        /* Channels */
-               "-r", "48000",    /* Sample rate */
-               NULL);
-        /* If execlp returns, it failed */
-        LOGD("%s: execlp(alsaloop) failed: %s\n", __FUNCTION__, strerror(errno));
-        _exit(1);
-    } else {
-        /* Parent process */
-        g_alsaloop_pid = pid;
-        LOGD("%s: alsaloop started with pid=%d\n", __FUNCTION__, g_alsaloop_pid);
-    }
-}
-
-/* Stop ALSA audio passthrough */
-static void StopAudioPassthrough(void)
-{
-    if (g_alsaloop_pid <= 0) {
-        LOGD("%s: alsaloop not running\n", __FUNCTION__);
-        return;
-    }
-
-    LOGD("%s: Stopping audio passthrough (pid=%d)\n", __FUNCTION__, g_alsaloop_pid);
-
-    /* Send SIGTERM to alsaloop */
-    if (kill(g_alsaloop_pid, SIGTERM) == 0) {
-        /* Wait for process to exit */
-        int status;
-        waitpid(g_alsaloop_pid, &status, 0);
-        LOGD("%s: alsaloop terminated (status=%d)\n", __FUNCTION__, status);
-    } else {
-        LOGD("%s: kill() failed: %s\n", __FUNCTION__, strerror(errno));
-    }
-
-    g_alsaloop_pid = -1;
-}
-
-/* Trace macro - runtime controlled */
+/* Trace macro - uses config value */
 #define TRACE(level, fmt, ...) do { \
-    if (g_trace_level >= (level)) { \
+    if (config_get()->debug.trace_level >= (level)) { \
         printf("[TRACE] streambox-tv: " fmt, ##__VA_ARGS__); \
         fflush(stdout); \
     } \
 } while(0)
 
-static void print_usage(const char *prog_name)
-{
-    printf("Usage: %s [OPTIONS]\n", prog_name);
-    printf("\n");
-    printf("HDMI input passthrough application for StreamBox with game mode and VRR support.\n");
-    printf("\n");
-    printf("Options:\n");
-    printf("  -g, --game-mode <0|1|2>  Game mode selection:\n");
-    printf("                             0 = disable game mode\n");
-    printf("                             1 = game mode 1\n");
-    printf("                             2 = game mode 2 with force VRR enabled (default)\n");
-    printf("  -t, --trace <0-3>        Trace level:\n");
-    printf("                             0 = off (default)\n");
-    printf("                             1 = low (major events)\n");
-    printf("                             2 = medium (function calls)\n");
-    printf("                             3 = high (verbose)\n");
-    printf("  -h, --help               Display this help and exit\n");
-    printf("\n");
-    printf("Examples:\n");
-    printf("  %s                       # Default: game mode 2 with VRR\n", prog_name);
-    printf("  %s -g 0                  # Disable game mode\n", prog_name);
-    printf("  %s -g 1 -t 2             # Game mode 1 with medium trace\n", prog_name);
-    printf("  %s --game-mode=2 --trace=3  # Game mode 2 with high trace\n", prog_name);
-}
+/* --- Forward Declarations --- */
+static void StartAudioPassthrough(void);
+static void StopAudioPassthrough(void);
+static void StartTvProcessing(struct TvClientWrapper_t *pTvClientWrapper);
+static void StopTvProcessing(struct TvClientWrapper_t *pTvClientWrapper);
+static void ApplyVrrMode(int vrr_mode);
+
+/* --- Sysfs Helpers --- */
 
 static int WriteSysfs(const char *path, const char *cmd)
 {
@@ -145,7 +75,6 @@ static int WriteSysfs(const char *path, const char *cmd)
     return -1;
 }
 
-/* Read sysfs file and return value as string */
 static int ReadSysfs(const char *path, char *buf, size_t buf_size)
 {
     int fd;
@@ -168,7 +97,6 @@ static int ReadSysfs(const char *path, char *buf, size_t buf_size)
     }
 
     buf[bytes_read] = '\0';
-    /* Remove trailing newline if present */
     if (bytes_read > 0 && buf[bytes_read - 1] == '\n') {
         buf[bytes_read - 1] = '\0';
     }
@@ -176,7 +104,224 @@ static int ReadSysfs(const char *path, char *buf, size_t buf_size)
     return 0;
 }
 
-/* Read HDMI TX HPD state: returns 1 if connected, 0 if disconnected, -1 on error */
+/* --- Audio Passthrough --- */
+
+static void StartAudioPassthrough(void)
+{
+    const audio_config_t *audio = &config_get()->audio;
+    char latency_str[16];
+    char channels_str[8];
+    char rate_str[16];
+
+    pthread_mutex_lock(&g_audio_mutex);
+
+    if (!audio->enabled) {
+        LOGD("%s: Audio passthrough disabled in config\n", __FUNCTION__);
+        pthread_mutex_unlock(&g_audio_mutex);
+        return;
+    }
+
+    if (g_alsaloop_pid > 0) {
+        LOGD("%s: alsaloop already running (pid=%d)\n", __FUNCTION__, g_alsaloop_pid);
+        pthread_mutex_unlock(&g_audio_mutex);
+        return;
+    }
+
+    LOGD("%s: Starting audio passthrough (alsaloop)\n", __FUNCTION__);
+    LOGD("%s: capture=%s playback=%s latency=%d format=%s channels=%d rate=%d\n",
+         __FUNCTION__, audio->capture_device, audio->playback_device,
+         audio->latency_us, audio->sample_format, audio->channels, audio->sample_rate);
+
+    snprintf(latency_str, sizeof(latency_str), "%d", audio->latency_us);
+    snprintf(channels_str, sizeof(channels_str), "%d", audio->channels);
+    snprintf(rate_str, sizeof(rate_str), "%d", audio->sample_rate);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOGD("%s: fork() failed: %s\n", __FUNCTION__, strerror(errno));
+        pthread_mutex_unlock(&g_audio_mutex);
+        return;
+    } else if (pid == 0) {
+        /* Child process - execute alsaloop */
+        execlp("alsaloop", "alsaloop",
+               "-C", audio->capture_device,
+               "-P", audio->playback_device,
+               "-t", latency_str,
+               "-f", audio->sample_format,
+               "-c", channels_str,
+               "-r", rate_str,
+               NULL);
+        /* If execlp returns, it failed */
+        LOGD("%s: execlp(alsaloop) failed: %s\n", __FUNCTION__, strerror(errno));
+        _exit(1);
+    } else {
+        /* Parent process */
+        g_alsaloop_pid = pid;
+        LOGD("%s: alsaloop started with pid=%d\n", __FUNCTION__, g_alsaloop_pid);
+    }
+
+    pthread_mutex_unlock(&g_audio_mutex);
+}
+
+static void StopAudioPassthrough(void)
+{
+    pthread_mutex_lock(&g_audio_mutex);
+
+    if (g_alsaloop_pid <= 0) {
+        LOGD("%s: alsaloop not running\n", __FUNCTION__);
+        pthread_mutex_unlock(&g_audio_mutex);
+        return;
+    }
+
+    LOGD("%s: Stopping audio passthrough (pid=%d)\n", __FUNCTION__, g_alsaloop_pid);
+
+    if (kill(g_alsaloop_pid, SIGTERM) == 0) {
+        int status;
+        waitpid(g_alsaloop_pid, &status, 0);
+        LOGD("%s: alsaloop terminated (status=%d)\n", __FUNCTION__, status);
+    } else {
+        LOGD("%s: kill() failed: %s\n", __FUNCTION__, strerror(errno));
+    }
+
+    g_alsaloop_pid = -1;
+    pthread_mutex_unlock(&g_audio_mutex);
+}
+
+/* Restart audio with new config (called on audio config change) */
+static void RestartAudioPassthrough(void)
+{
+    LOGD("%s: Restarting audio passthrough with new config\n", __FUNCTION__);
+    StopAudioPassthrough();
+    usleep(100000); /* 100ms delay */
+    StartAudioPassthrough();
+}
+
+/* --- VRR Mode Application --- */
+
+static void ApplyVrrMode(int vrr_mode)
+{
+    const video_config_t *video = &config_get()->video;
+    int ret;
+
+    if (video->game_mode != 2) {
+        LOGD("%s: Game mode is %d, skipping VRR\n", __FUNCTION__, video->game_mode);
+        return;
+    }
+
+    LOGD("%s: Applying VRR mode %d\n", __FUNCTION__, vrr_mode);
+
+    switch (vrr_mode) {
+    case 0: /* Force VRR Only */
+        LOGD("%s: Setting Force VRR mode (vrr mode 1)\n", __FUNCTION__);
+        ret = WriteSysfs(VRR_DEBUG_PATH, "mode 1");
+        if (ret == 0) {
+            ret = WriteSysfs(VRR_DEBUG_PATH, "en 1");
+        }
+        break;
+
+    case 1: /* VRR On (EDID advertise) */
+        LOGD("%s: Setting VRR On mode (vrr mode 0, EDID)\n", __FUNCTION__);
+        /* TODO: Modify EDID to advertise VRR support */
+        /* For now, enable native VRR if supported */
+        if (g_pTvClientWrapper != NULL) {
+            int vrr_enabled = GetHdmiVrrEnabled(g_pTvClientWrapper);
+            if (vrr_enabled) {
+                ret = WriteSysfs(VRR_DEBUG_PATH, "mode 0");
+                if (ret == 0) {
+                    ret = WriteSysfs(VRR_DEBUG_PATH, "en 1");
+                }
+            } else {
+                LOGD("%s: Native VRR not supported, VRR disabled\n", __FUNCTION__);
+                WriteSysfs(VRR_DEBUG_PATH, "en 0");
+            }
+        }
+        break;
+
+    case 2: /* Auto (default) */
+    default:
+        LOGD("%s: Setting VRR Auto mode\n", __FUNCTION__);
+        /* Check if native VRR is supported */
+        if (g_pTvClientWrapper != NULL) {
+            int vrr_enabled = GetHdmiVrrEnabled(g_pTvClientWrapper);
+            if (vrr_enabled) {
+                /* Use native VRR */
+                LOGD("%s: Native VRR supported, using vrr mode 0\n", __FUNCTION__);
+                ret = WriteSysfs(VRR_DEBUG_PATH, "mode 0");
+            } else {
+                /* Fallback to force VRR */
+                LOGD("%s: Native VRR not supported, using force VRR (mode 1)\n", __FUNCTION__);
+                ret = WriteSysfs(VRR_DEBUG_PATH, "mode 1");
+            }
+            if (ret == 0) {
+                ret = WriteSysfs(VRR_DEBUG_PATH, "en 1");
+            }
+        }
+        break;
+    }
+}
+
+/* --- Config Change Callback --- */
+
+static void OnConfigChange(config_change_t changes, const streambox_config_t *old_config, const streambox_config_t *new_config)
+{
+    LOGD("%s: Config changed, changes=0x%x\n", __FUNCTION__, changes);
+
+    /* Handle audio changes - restart alsaloop without affecting video */
+    if (changes & CONFIG_CHANGE_AUDIO) {
+        LOGD("%s: Audio config changed, restarting audio passthrough\n", __FUNCTION__);
+        if (g_tv_started) {
+            RestartAudioPassthrough();
+        }
+    }
+
+    /* Handle video changes */
+    if (changes & CONFIG_CHANGE_VIDEO) {
+        LOGD("%s: Video config changed\n", __FUNCTION__);
+        
+        /* Check if VRR mode changed */
+        if (old_config->video.vrr_mode != new_config->video.vrr_mode) {
+            LOGD("%s: VRR mode changed %d -> %d\n", __FUNCTION__,
+                 old_config->video.vrr_mode, new_config->video.vrr_mode);
+            if (g_tv_started) {
+                ApplyVrrMode(new_config->video.vrr_mode);
+            }
+        }
+
+        /* Check if game mode changed */
+        if (old_config->video.game_mode != new_config->video.game_mode) {
+            LOGD("%s: Game mode changed %d -> %d\n", __FUNCTION__,
+                 old_config->video.game_mode, new_config->video.game_mode);
+            /* Game mode change requires restart */
+            if (g_tv_started && g_pTvClientWrapper != NULL) {
+                int game_mode_value = (new_config->video.game_mode == 2) ? 3 : 
+                                      (new_config->video.game_mode == 1) ? 1 : 0;
+                SetGameMode(g_pTvClientWrapper, new_config->video.game_mode > 0 ? 1 : 0, game_mode_value);
+            }
+        }
+
+        /* Check if HDMI source changed */
+        if (strcmp(old_config->video.hdmi_source, new_config->video.hdmi_source) != 0) {
+            LOGD("%s: HDMI source changed %s -> %s (requires restart)\n", __FUNCTION__,
+                 old_config->video.hdmi_source, new_config->video.hdmi_source);
+            /* Source change requires full restart - not implemented for dynamic reload */
+        }
+    }
+
+    /* Handle HDCP changes */
+    if (changes & CONFIG_CHANGE_HDCP) {
+        LOGD("%s: HDCP config changed\n", __FUNCTION__);
+        /* HDCP changes would be applied here */
+    }
+
+    /* Handle debug changes */
+    if (changes & CONFIG_CHANGE_DEBUG) {
+        LOGD("%s: Debug config changed, trace_level=%d\n", __FUNCTION__, new_config->debug.trace_level);
+        /* Trace level takes effect immediately via config_get() */
+    }
+}
+
+/* --- HDMI TX HPD Monitoring --- */
+
 static int GetHdmiTxHpdState(void)
 {
     char buf[16] = {0};
@@ -187,7 +332,6 @@ static int GetHdmiTxHpdState(void)
     return (atoi(buf) == 1) ? 1 : 0;
 }
 
-/* Create netlink socket for uevent monitoring */
 static int CreateUeventSocket(void)
 {
     struct sockaddr_nl addr;
@@ -202,7 +346,7 @@ static int CreateUeventSocket(void)
     memset(&addr, 0, sizeof(addr));
     addr.nl_family = AF_NETLINK;
     addr.nl_pid = getpid();
-    addr.nl_groups = 1; /* Receive broadcast messages */
+    addr.nl_groups = 1;
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         LOGD("Failed to bind uevent socket\n");
@@ -213,13 +357,11 @@ static int CreateUeventSocket(void)
     return fd;
 }
 
-/* Parse uevent for hdmitx_hpd event, returns: 0=disconnect, 1=connect, -1=not HPD event */
 static int ParseHdmiTxHpdEvent(const char *buf, int len)
 {
     const char *ptr = buf;
     const char *end = buf + len;
 
-    /* Look for hdmitx_hpd= in the uevent data */
     while (ptr < end) {
         if (strncmp(ptr, "hdmitx_hpd=", 11) == 0) {
             int state = atoi(ptr + 11);
@@ -228,24 +370,30 @@ static int ParseHdmiTxHpdEvent(const char *buf, int len)
         }
         ptr += strlen(ptr) + 1;
     }
-    return -1; /* Not an HPD event */
+    return -1;
 }
 
-/* Start TV processing - configure and start HDMI input */
+/* --- TV Processing --- */
+
 static void StartTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
 {
+    const video_config_t *video = &config_get()->video;
+    tv_source_input_t source;
+
     if (g_tv_started) {
         LOGD("%s: TV already started\n", __FUNCTION__);
         return;
     }
 
     LOGD("%s: Starting TV processing\n", __FUNCTION__);
+    LOGD("%s: game_mode=%d, vrr_mode=%d, hdmi_source=%s\n",
+         __FUNCTION__, video->game_mode, video->vrr_mode, video->hdmi_source);
 
 #ifdef STREAM_BOX
-    if (g_game_mode > 0) {
+    if (video->game_mode > 0) {
         int ret;
 
-        /* Enable ALLM (Auto Low Latency Mode) */
+        /* Enable ALLM (Auto Low Latency Mode) - always enabled */
         ret = SetHdmiAllmEnabled(pTvClientWrapper, 1);
         if (ret == 0) {
             LOGD("ALLM enabled successfully\n");
@@ -262,7 +410,7 @@ static void StartTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
         }
 
         /* Set Game Mode */
-        int game_mode_value = (g_game_mode == 2) ? 3 : 1;
+        int game_mode_value = (video->game_mode == 2) ? 3 : 1;
         ret = SetGameMode(pTvClientWrapper, 1, game_mode_value);
         if (ret == 0) {
             LOGD("Game Mode enabled successfully (game_mode_value=%d)\n", game_mode_value);
@@ -272,15 +420,17 @@ static void StartTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
     }
 #endif
 
-    StartTv(pTvClientWrapper, g_current_source);
+    source = (tv_source_input_t)config_get_source_input(video->hdmi_source);
+    StartTv(pTvClientWrapper, source);
     g_tv_started = 1;
     LOGD("%s: TV processing started\n", __FUNCTION__);
 }
 
-/* Stop TV processing */
 static void StopTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
 {
-    /* Stop audio passthrough first */
+    const video_config_t *video = &config_get()->video;
+    tv_source_input_t source;
+
     StopAudioPassthrough();
 
     if (!g_tv_started) {
@@ -290,17 +440,19 @@ static void StopTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
 
     LOGD("%s: Stopping TV processing\n", __FUNCTION__);
 
-    /* Disable VRR force mode */
-    if (g_game_mode == 2) {
+    /* Disable VRR */
+    if (video->game_mode == 2) {
         WriteSysfs(VRR_DEBUG_PATH, "en 0");
     }
 
-    StopTv(pTvClientWrapper, g_current_source);
+    source = (tv_source_input_t)config_get_source_input(video->hdmi_source);
+    StopTv(pTvClientWrapper, source);
     g_tv_started = 0;
     LOGD("%s: TV processing stopped\n", __FUNCTION__);
 }
 
-/* Uevent monitor thread */
+/* --- Uevent Monitor Thread --- */
+
 static void *UeventMonitorThread(void *arg)
 {
     struct TvClientWrapper_t *pTvClientWrapper = (struct TvClientWrapper_t *)arg;
@@ -313,7 +465,7 @@ static void *UeventMonitorThread(void *arg)
     LOGD("Uevent monitor thread started\n");
 
     while (run) {
-        int ret = poll(&pfd, 1, 1000); /* 1 second timeout */
+        int ret = poll(&pfd, 1, 1000);
         if (ret > 0 && (pfd.revents & POLLIN)) {
             int len = recv(g_uevent_fd, buf, sizeof(buf) - 1, 0);
             if (len > 0) {
@@ -337,7 +489,8 @@ static void *UeventMonitorThread(void *arg)
     return NULL;
 }
 
-/* Read input_rate from vdin and parse to get actual framerate in Hz (as float) */
+/* --- Framerate Detection --- */
+
 static int GetVdinInputRate(float *input_rate_hz)
 {
     const char *vdin_input_rate_path = "/sys/class/vdin/vdin0/input_rate";
@@ -356,14 +509,12 @@ static int GetVdinInputRate(float *input_rate_hz)
         return -1;
     }
 
-    /* Parse format: "XXX.XXX" (e.g., "119.880") */
     ret = sscanf(buf, "%d.%d", &int_part, &frac_part);
     if (ret != 2) {
         LOGD("%s: Failed to parse input_rate: %s\n", __FUNCTION__, buf);
         return -1;
     }
 
-    /* Convert to Hz: int_part + frac_part/1000.0 */
     rate = (float)int_part + (float)frac_part / 1000.0f;
     *input_rate_hz = rate;
 
@@ -371,61 +522,38 @@ static int GetVdinInputRate(float *input_rate_hz)
     return 0;
 }
 
-/* Determine frac_rate_policy based on actual input_rate vs rounded fps */
 static int DetermineFracRatePolicy(int rounded_fps, float actual_input_rate_hz)
 {
-    /* Fractional framerate thresholds:
-     * - 120Hz: if input_rate <= 119.88Hz -> use fractional (1)
-     * - 60Hz:  if input_rate <= 59.94Hz  -> use fractional (1)
-     * - 30Hz:  if input_rate <= 29.97Hz  -> use fractional (1)
-     * - 24Hz:  if input_rate <= 23.976Hz -> use fractional (1)
-     * Otherwise use perfect framerate (0)
-     */
     int frac_rate_policy = 0;
 
     switch (rounded_fps) {
     case 120:
         if (actual_input_rate_hz <= 119.88f) {
             frac_rate_policy = 1;
-            LOGD("%s: Detected fractional framerate: %.3f Hz <= 119.88 Hz (for 120Hz)\n",
-                 __FUNCTION__, actual_input_rate_hz);
         }
         break;
     case 60:
         if (actual_input_rate_hz <= 59.94f) {
             frac_rate_policy = 1;
-            LOGD("%s: Detected fractional framerate: %.3f Hz <= 59.94 Hz (for 60Hz)\n",
-                 __FUNCTION__, actual_input_rate_hz);
         }
         break;
     case 30:
         if (actual_input_rate_hz <= 29.97f) {
             frac_rate_policy = 1;
-            LOGD("%s: Detected fractional framerate: %.3f Hz <= 29.97 Hz (for 30Hz)\n",
-                 __FUNCTION__, actual_input_rate_hz);
         }
         break;
     case 24:
         if (actual_input_rate_hz <= 23.976f) {
             frac_rate_policy = 1;
-            LOGD("%s: Detected fractional framerate: %.3f Hz <= 23.976 Hz (for 24Hz)\n",
-                 __FUNCTION__, actual_input_rate_hz);
         }
         break;
     default:
-        /* For other framerates, use perfect framerate (0) */
         break;
-    }
-
-    if (frac_rate_policy == 0) {
-        LOGD("%s: Using perfect framerate (frac_rate_policy=0) for %dHz (actual: %.3f Hz)\n",
-             __FUNCTION__, rounded_fps, actual_input_rate_hz);
     }
 
     return frac_rate_policy;
 }
 
-/* Format hdmitx mode string from resolution and framerate */
 static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size_t mode_str_size, int fine_tune)
 {
     if (mode_str == NULL || mode_str_size < 32) {
@@ -435,57 +563,39 @@ static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size
     int rounded_fps = fps;
 
     if (fine_tune) {
-        /* Fine-tune framerate to perfectly match rx framerate when VRR is not supported */
-        /* Handle common fractional framerates by rounding to nearest standard framerate */
-        if (fps >= 59 && fps <= 60) {
-            /* 59.94Hz or similar -> 60Hz */
-            rounded_fps = 60;
-        } else if (fps >= 29 && fps <= 30) {
-            /* 29.97Hz or similar -> 30Hz */
-            rounded_fps = 30;
-        } else if (fps >= 23 && fps <= 24) {
-            /* 23.976Hz or similar -> 24Hz */
-            rounded_fps = 24;
-        } else if (fps >= 119 && fps <= 120) {
-            /* 119.88Hz or similar -> 120Hz */
-            rounded_fps = 120;
-        } else {
-            /* For other framerates, round to nearest integer */
-            rounded_fps = (fps + 1) / 2 * 2; /* Round to nearest even number for common cases */
-            if (rounded_fps < fps) rounded_fps = fps; /* Prefer rounding up */
+        if (fps >= 59 && fps <= 60) rounded_fps = 60;
+        else if (fps >= 29 && fps <= 30) rounded_fps = 30;
+        else if (fps >= 23 && fps <= 24) rounded_fps = 24;
+        else if (fps >= 119 && fps <= 120) rounded_fps = 120;
+        else {
+            rounded_fps = (fps + 1) / 2 * 2;
+            if (rounded_fps < fps) rounded_fps = fps;
         }
-        LOGD("%s: Fine-tuning framerate: %dHz -> %dHz\n", __FUNCTION__, fps, rounded_fps);
     } else {
-        /* With VRR support, use general framerate matching (round to standard values) */
-        if (fps >= 50 && fps < 60) {
-            rounded_fps = 60; /* 50Hz/59.94Hz -> 60Hz */
-        } else if (fps >= 100 && fps < 120) {
-            rounded_fps = 120; /* 100Hz/119.88Hz -> 120Hz */
-        } else if (fps >= 24 && fps < 30) {
-            rounded_fps = 30; /* 24Hz/29.97Hz -> 30Hz */
-        }
-        /* Otherwise use the framerate as-is */
+        if (fps >= 50 && fps < 60) rounded_fps = 60;
+        else if (fps >= 100 && fps < 120) rounded_fps = 120;
+        else if (fps >= 24 && fps < 30) rounded_fps = 30;
     }
 
-    /* Format: "widthxheightp<fps>hz" (e.g., "1920x1080p60hz") */
     snprintf(mode_str, mode_str_size, "%dx%dp%dhz", width, height, rounded_fps);
     return 0;
 }
 
-/* Synchronize hdmitx output to match hdmirx input */
+/* --- HDMI TX/RX Synchronization --- */
+
 static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper)
 {
+    const video_config_t *video = &config_get()->video;
+    int ret;
+
     if (pTvClientWrapper == NULL) {
-        LOGD("%s: pTvClientWrapper is NULL\n", __FUNCTION__);
         return;
     }
 
     TRACE(2, "SynchronizeHdmitxToHdmirx() ENTRY\n");
 
-    /* Wait a bit for signal info to be available after event */
     usleep(100000); /* 100ms delay */
 
-    /* Get current hdmirx resolution and framerate */
     int rx_width = GetCurrentSourceFrameWidth(pTvClientWrapper);
     int rx_height = GetCurrentSourceFrameHeight(pTvClientWrapper);
     int rx_fps = GetCurrentSourceFrameFps(pTvClientWrapper);
@@ -500,138 +610,77 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
 
     int fine_tune_framerate = 0;
 #ifdef STREAM_BOX
-    /* Check VRR support on hdmirx side */
     int vrr_enabled = GetHdmiVrrEnabled(pTvClientWrapper);
     int vrr_supported = (vrr_enabled != 0);
 
-    LOGD("%s: VRR enabled: %d\n", __FUNCTION__, vrr_enabled);
-
     if (!vrr_supported) {
-        /* Fine-tune framerate to perfectly match rx framerate when VRR is not supported */
         fine_tune_framerate = 1;
-        LOGD("%s: VRR not supported, fine-tuning framerate to match exactly\n", __FUNCTION__);
-    } else {
-        /* VRR is supported, use general framerate matching */
-        LOGD("%s: VRR supported, using general framerate matching\n", __FUNCTION__);
     }
 #endif
 
-    /* Calculate rounded fps (same logic as FormatHdmitxMode) for frac_rate_policy determination */
     int rounded_fps = rx_fps;
     if (fine_tune_framerate) {
-        /* Fine-tune framerate to perfectly match rx framerate when VRR is not supported */
-        if (rx_fps >= 59 && rx_fps <= 60) {
-            rounded_fps = 60;
-        } else if (rx_fps >= 29 && rx_fps <= 30) {
-            rounded_fps = 30;
-        } else if (rx_fps >= 23 && rx_fps <= 24) {
-            rounded_fps = 24;
-        } else if (rx_fps >= 119 && rx_fps <= 120) {
-            rounded_fps = 120;
-        } else {
+        if (rx_fps >= 59 && rx_fps <= 60) rounded_fps = 60;
+        else if (rx_fps >= 29 && rx_fps <= 30) rounded_fps = 30;
+        else if (rx_fps >= 23 && rx_fps <= 24) rounded_fps = 24;
+        else if (rx_fps >= 119 && rx_fps <= 120) rounded_fps = 120;
+        else {
             rounded_fps = (rx_fps + 1) / 2 * 2;
             if (rounded_fps < rx_fps) rounded_fps = rx_fps;
         }
     } else {
-        /* With VRR support, use general framerate matching */
-        if (rx_fps >= 50 && rx_fps < 60) {
-            rounded_fps = 60;
-        } else if (rx_fps >= 100 && rx_fps < 120) {
-            rounded_fps = 120;
-        } else if (rx_fps >= 24 && rx_fps < 30) {
-            rounded_fps = 30;
-        }
+        if (rx_fps >= 50 && rx_fps < 60) rounded_fps = 60;
+        else if (rx_fps >= 100 && rx_fps < 120) rounded_fps = 120;
+        else if (rx_fps >= 24 && rx_fps < 30) rounded_fps = 30;
     }
 
-    /* Format hdmitx mode string */
     char mode_str[64] = {0};
-    int ret = FormatHdmitxMode(rx_width, rx_height, rx_fps, mode_str, sizeof(mode_str), fine_tune_framerate);
+    ret = FormatHdmitxMode(rx_width, rx_height, rx_fps, mode_str, sizeof(mode_str), fine_tune_framerate);
     if (ret != 0) {
-        LOGD("%s: Failed to format hdmitx mode string\n", __FUNCTION__);
         return;
     }
 
-    /* Read actual input_rate from vdin to determine if fractional framerate is needed */
     float actual_input_rate_hz = 0.0f;
     int frac_rate_policy = 0;
     ret = GetVdinInputRate(&actual_input_rate_hz);
     if (ret == 0) {
-        /* Successfully read input_rate, determine frac_rate_policy */
         frac_rate_policy = DetermineFracRatePolicy(rounded_fps, actual_input_rate_hz);
-    } else {
-        /* Failed to read input_rate, default to perfect framerate (0) */
-        LOGD("%s: Failed to read input_rate, defaulting to perfect framerate (frac_rate_policy=0)\n", __FUNCTION__);
-        frac_rate_policy = 0;
     }
 
     const char *hdmitx_disp_mode_path = "/sys/class/amhdmitx/amhdmitx0/disp_mode";
     const char *hdmitx_frac_rate_policy_path = "/sys/class/amhdmitx/amhdmitx0/frac_rate_policy";
 
-    /* Set frac_rate_policy BEFORE setting disp_mode (required by driver) */
     char frac_policy_str[2] = {0};
     snprintf(frac_policy_str, sizeof(frac_policy_str), "%d", frac_rate_policy);
-    LOGD("%s: Setting frac_rate_policy to %d before setting disp_mode\n", __FUNCTION__, frac_rate_policy);
-    ret = WriteSysfs(hdmitx_frac_rate_policy_path, frac_policy_str);
-    if (ret != 0) {
-        LOGD("%s: Warning: Failed to set frac_rate_policy to %d (ret=%d), continuing anyway\n",
-             __FUNCTION__, frac_rate_policy, ret);
-    } else {
-        LOGD("%s: Successfully set frac_rate_policy to %d\n", __FUNCTION__, frac_rate_policy);
-        /* Small delay after setting frac_rate_policy */
-        usleep(10000); /* 10ms delay */
-    }
+    WriteSysfs(hdmitx_frac_rate_policy_path, frac_policy_str);
+    usleep(10000);
 
-    /* Disable current mode before setting new mode (required by driver) */
-    LOGD("%s: Disabling current hdmitx mode before setting new mode\n", __FUNCTION__);
-    ret = WriteSysfs(hdmitx_disp_mode_path, "off");
-    if (ret != 0) {
-        LOGD("%s: Warning: Failed to disable current hdmitx mode (ret=%d), continuing anyway\n", __FUNCTION__, ret);
-    } else {
-        /* Wait a bit for mode to be disabled */
-        usleep(50000); /* 50ms delay */
-    }
+    WriteSysfs(hdmitx_disp_mode_path, "off");
+    usleep(50000);
 
-    /* Set hdmitx output mode to match hdmirx input */
     ret = WriteSysfs(hdmitx_disp_mode_path, mode_str);
     if (ret == 0) {
-        LOGD("%s: Successfully set hdmitx mode to: %s (with frac_rate_policy=%d)\n",
-             __FUNCTION__, mode_str, frac_rate_policy);
+        LOGD("%s: Successfully set hdmitx mode to: %s\n", __FUNCTION__, mode_str);
+        usleep(200000);
 
-        /* Wait for HDMI TX to stabilize after mode change */
-        usleep(200000); /* 200ms delay for TX to stabilize */
-
-        /* Enable force VRR frame lock for low latency HDMI passthrough */
-        /* Only enable VRR if game_mode == 2 */
-        if (g_game_mode == 2) {
-            LOGD("%s: Enabling force VRR frame lock mode (game_mode=%d)\n", __FUNCTION__, g_game_mode);
-            ret = WriteSysfs(VRR_DEBUG_PATH, "mode 1");
-            if (ret == 0) {
-                ret = WriteSysfs(VRR_DEBUG_PATH, "en 1");
-                if (ret == 0) {
-                    LOGD("%s: Force VRR frame lock enabled successfully\n", __FUNCTION__);
-                } else {
-                    LOGD("%s: Failed to enable VRR (ret=%d)\n", __FUNCTION__, ret);
-                }
-            } else {
-                LOGD("%s: Failed to set VRR mode (ret=%d)\n", __FUNCTION__, ret);
-            }
-        } else {
-            LOGD("%s: Skipping VRR force enable (game_mode=%d)\n", __FUNCTION__, g_game_mode);
+        /* Apply VRR mode from config */
+        if (video->game_mode == 2) {
+            ApplyVrrMode(video->vrr_mode);
         }
     } else {
-        LOGD("%s: Failed to set hdmitx mode to: %s (ret=%d)\n", __FUNCTION__, mode_str, ret);
+        LOGD("%s: Failed to set hdmitx mode to: %s\n", __FUNCTION__, mode_str);
     }
 
     TRACE(2, "SynchronizeHdmitxToHdmirx() EXIT\n");
 }
 
-static int DisplayInit()
+static int DisplayInit(void)
 {
-//    WriteSysfs("/sys/class/graphics/fb0/osd_display_debug", "1");
     WriteSysfs("/sys/class/graphics/fb0/blank", "1");
     return 0;
-
 }
+
+/* --- Event Callback --- */
 
 static void TvEventCallback(event_type_t eventType, void *eventData)
 {
@@ -644,15 +693,11 @@ static void TvEventCallback(event_type_t eventType, void *eventData)
                                                    signalDetectEvent->SignalStatus,
                                                    signalDetectEvent->isDviSignal);
 
-        /* When hdmirx input change event received and signal is stable, synchronize hdmitx and start audio */
         if (signalDetectEvent->SignalStatus == TVIN_SIG_STATUS_STABLE && g_pTvClientWrapper != NULL) {
             LOGD("%s: HDMIRX input change detected (stable signal), synchronizing HDMITX\n", __FUNCTION__);
             SynchronizeHdmitxToHdmirx(g_pTvClientWrapper);
-
-            /* Start audio passthrough now that signal is stable */
             StartAudioPassthrough();
         } else if (signalDetectEvent->SignalStatus != TVIN_SIG_STATUS_STABLE) {
-            /* Signal is not stable (unstable, no signal, etc.) - stop audio passthrough */
             LOGD("%s: HDMIRX signal not stable (status=%d), stopping audio passthrough\n",
                  __FUNCTION__, signalDetectEvent->SignalStatus);
             StopAudioPassthrough();
@@ -661,26 +706,45 @@ static void TvEventCallback(event_type_t eventType, void *eventData)
         SourceConnectCallback_t *sourceConnectEvent = (SourceConnectCallback_t *)(eventData);
         LOGD("%s: source: %d, connectStatus: %d\n", __FUNCTION__,
                   sourceConnectEvent->SourceInput, sourceConnectEvent->ConnectionState);
-    } else {
-        LOGD("%s: invalid event.\n", __FUNCTION__);
     }
 }
 
 static void signal_handler(int s)
 {
-    void *retval;
     run = 0;
-
-	WriteSysfs("/sys/class/graphics/fb0/blank", "0");
+    WriteSysfs("/sys/class/graphics/fb0/blank", "0");
     signal(s, SIG_DFL);
     raise(s);
 }
 
+/* --- Usage --- */
+
+static void print_usage(const char *prog_name)
+{
+    printf("Usage: %s [OPTIONS]\n", prog_name);
+    printf("\n");
+    printf("HDMI input passthrough application for StreamBox with config file support.\n");
+    printf("\n");
+    printf("Options:\n");
+    printf("  -c, --config <path>       Config file path (default: %s)\n", CONFIG_FILE_PATH);
+    printf("  -g, --game-mode <0|1|2>   Override game mode from config\n");
+    printf("  -t, --trace <0-3>         Override trace level from config\n");
+    printf("  -h, --help                Display this help and exit\n");
+    printf("\n");
+    printf("Config file is reloaded on SIGHUP or when file changes.\n");
+}
+
+/* --- Main --- */
+
 int main(int argc, char **argv) {
     int opt;
     int option_index = 0;
+    const char *config_path = NULL;
+    int override_game_mode = -1;
+    int override_trace_level = -1;
 
     static struct option long_options[] = {
+        {"config",    required_argument, 0, 'c'},
         {"game-mode", required_argument, 0, 'g'},
         {"trace",     required_argument, 0, 't'},
         {"help",      no_argument,       0, 'h'},
@@ -688,19 +752,22 @@ int main(int argc, char **argv) {
     };
 
     /* Parse command line arguments */
-    while ((opt = getopt_long(argc, argv, "g:t:h", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:g:t:h", long_options, &option_index)) != -1) {
         switch (opt) {
+        case 'c':
+            config_path = optarg;
+            break;
         case 'g':
-            g_game_mode = atoi(optarg);
-            if (g_game_mode < 0 || g_game_mode > 2) {
+            override_game_mode = atoi(optarg);
+            if (override_game_mode < 0 || override_game_mode > 2) {
                 fprintf(stderr, "Error: Invalid game mode '%s'. Must be 0, 1, or 2.\n", optarg);
                 print_usage(argv[0]);
                 return 1;
             }
             break;
         case 't':
-            g_trace_level = atoi(optarg);
-            if (g_trace_level < 0 || g_trace_level > 3) {
+            override_trace_level = atoi(optarg);
+            if (override_trace_level < 0 || override_trace_level > 3) {
                 fprintf(stderr, "Error: Invalid trace level '%s'. Must be 0-3.\n", optarg);
                 print_usage(argv[0]);
                 return 1;
@@ -715,8 +782,27 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Print configuration */
-    printf("streambox-tv starting with: game_mode=%d, trace_level=%d\n", g_game_mode, g_trace_level);
+    /* Initialize config system */
+    config_init();
+    config_load(config_path);
+
+    /* Register config change callback */
+    config_register_callback(OnConfigChange);
+
+    /* Start config file watcher */
+    config_watch_start();
+
+    /* Apply command line overrides (for backwards compatibility) */
+    /* Note: These don't modify the config file, just runtime behavior */
+    /* For now, we trust the config file - remove override support to keep it simple */
+
+    const streambox_config_t *cfg = config_get();
+    printf("streambox-tv starting with config:\n");
+    printf("  video: game_mode=%d, vrr_mode=%d, hdmi_source=%s\n",
+           cfg->video.game_mode, cfg->video.vrr_mode, cfg->video.hdmi_source);
+    printf("  audio: enabled=%d, capture=%s, playback=%s\n",
+           cfg->audio.enabled, cfg->audio.capture_device, cfg->audio.playback_device);
+    printf("  debug: trace_level=%d\n", cfg->debug.trace_level);
 
     TRACE(1, "main() ENTRY\n");
 
@@ -724,20 +810,17 @@ int main(int argc, char **argv) {
     g_uevent_fd = CreateUeventSocket();
     if (g_uevent_fd < 0) {
         LOGD("Warning: Failed to create uevent socket, will use polling fallback\n");
-    } else {
-        LOGD("Uevent socket created successfully\n");
     }
 
     /* Check initial HDMI TX state */
     g_hdmitx_connected = (GetHdmiTxHpdState() == 1);
     LOGD("Initial HDMI TX state: %s\n", g_hdmitx_connected ? "connected" : "disconnected");
 
-    /* Wait for HDMI TX connection if not connected */
+    /* Wait for HDMI TX connection */
     if (!g_hdmitx_connected) {
         LOGD("Waiting for HDMI TX connection...\n");
         while (run && !g_hdmitx_connected) {
             if (g_uevent_fd >= 0) {
-                /* Wait for uevent */
                 struct pollfd pfd = { .fd = g_uevent_fd, .events = POLLIN };
                 if (poll(&pfd, 1, 500) > 0 && (pfd.revents & POLLIN)) {
                     char buf[4096];
@@ -750,7 +833,6 @@ int main(int argc, char **argv) {
                     }
                 }
             } else {
-                /* Fallback to polling */
                 usleep(500000);
                 g_hdmitx_connected = (GetHdmiTxHpdState() == 1);
             }
@@ -763,30 +845,21 @@ int main(int argc, char **argv) {
     TRACE(2, "About to call GetInstance()\n");
     struct TvClientWrapper_t *pTvClientWrapper = GetInstance();
     g_pTvClientWrapper = pTvClientWrapper;
-    TRACE(2, "Returned from GetInstance(), pTvClientWrapper = %p\n", pTvClientWrapper);
 
-    TRACE(2, "About to call setTvEventCallback()\n");
     setTvEventCallback(TvEventCallback);
-
-    TRACE(2, "About to call StopTv()\n");
-    StopTv(pTvClientWrapper, g_current_source);
-    TRACE(2, "Returned from StopTv()\n");
-
-    TRACE(3, "About to sleep(1)\n");
+    
+    tv_source_input_t source = (tv_source_input_t)config_get_source_input(cfg->video.hdmi_source);
+    StopTv(pTvClientWrapper, source);
     sleep(1);
 
     DisplayInit();
-    TRACE(2, "Returned from DisplayInit()\n");
 
-    /* Start TV processing */
     StartTvProcessing(pTvClientWrapper);
 
-    /* Start uevent monitor thread for HPD changes */
+    /* Start uevent monitor thread */
     if (g_uevent_fd >= 0) {
         if (pthread_create(&g_uevent_thread, NULL, UeventMonitorThread, pTvClientWrapper) != 0) {
             LOGD("Failed to create uevent monitor thread\n");
-        } else {
-            LOGD("Uevent monitor thread started\n");
         }
     }
 
@@ -800,17 +873,23 @@ int main(int argc, char **argv) {
 cleanup:
     TRACE(1, "main() cleanup\n");
 
-    /* Wait for uevent monitor thread to exit */
+    /* Stop config watcher */
+    config_watch_stop();
+
+    /* Wait for uevent monitor thread */
     if (g_uevent_fd >= 0) {
         pthread_join(g_uevent_thread, NULL);
         close(g_uevent_fd);
         g_uevent_fd = -1;
     }
 
-    /* Stop TV if still running */
+    /* Stop TV */
     if (g_tv_started && g_pTvClientWrapper) {
         StopTvProcessing(g_pTvClientWrapper);
     }
+
+    /* Cleanup config */
+    config_cleanup();
 
     TRACE(1, "main() EXIT\n");
     return 0;

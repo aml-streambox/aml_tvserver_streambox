@@ -86,6 +86,7 @@ hdmiin-demo_SRCS  = \
 ################################################################################
 streambox-tv_SRCS  = \
 	$(LOCAL_PATH)/test/streambox-tv.c \
+	$(LOCAL_PATH)/test/config.c \
 	$(NULL)
 
 # ---------------------------------------------------------------------
@@ -117,8 +118,8 @@ hdmiin-demo: $(hdmiin-demo_SRCS) libtvclient.so
 	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
 
 streambox-tv: $(streambox-tv_SRCS) libtvclient.so
-	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -L$(OUT_DIR) \
-	-ltvclient $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
+	$(CC) $(CFLAGS) -I$(tvclient_HEADERS) -I$(LOCAL_PATH)/test -L$(OUT_DIR) \
+	-ltvclient -lcjson $(LDFLAGS) -o $(OUT_DIR)/$@ $(filter-out %.so,$^) $(LDLIBS)
 
 all: $(BUILD_TARGETS)
 

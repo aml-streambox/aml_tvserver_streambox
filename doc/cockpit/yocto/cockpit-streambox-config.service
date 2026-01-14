@@ -1,0 +1,11 @@
+[Unit]
+Description=StreamBox Config API for Cockpit
+
+[Service]
+ExecStart=/usr/share/cockpit-streambox-config/main.py
+User=root
+Restart=on-failure
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

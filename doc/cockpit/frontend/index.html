@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamBox Config</title>
+    <link rel="stylesheet" href="streambox-config.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>StreamBox TV Configuration</h1>
+            <div class="status-bar">
+                <span id="service-status" class="status-badge">Loading...</span>
+                <button id="reload-btn" class="btn btn-secondary">Reload Config</button>
+            </div>
+        </header>
+
+        <main>
+            <!-- Video Settings -->
+            <section class="settings-section">
+                <h2>Video Settings</h2>
+                <div class="form-group">
+                    <label for="game-mode">Game Mode</label>
+                    <select id="game-mode">
+                        <option value="0">Disabled</option>
+                        <option value="1">Mode 1 (Low Latency)</option>
+                        <option value="2">Mode 2 (Low Latency + VRR)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="vrr-mode-group">
+                    <label for="vrr-mode">VRR Mode</label>
+                    <select id="vrr-mode">
+                        <option value="0">Force VRR Only</option>
+                        <option value="1">VRR On (EDID Advertise)</option>
+                        <option value="2">Auto (Recommended)</option>
+                    </select>
+                    <small>Only applies when Game Mode = 2</small>
+                </div>
+                <div class="form-group">
+                    <label for="hdmi-source">HDMI Source</label>
+                    <select id="hdmi-source">
+                        <option value="HDMI1">HDMI 1</option>
+                        <option value="HDMI2">HDMI 2</option>
+                        <option value="HDMI3">HDMI 3</option>
+                        <option value="HDMI4">HDMI 4</option>
+                    </select>
+                </div>
+            </section>
+
+            <!-- Audio Settings -->
+            <section class="settings-section">
+                <h2>Audio Settings</h2>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="audio-enabled">
+                        Enable Audio Passthrough
+                    </label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="capture-device">Capture Device</label>
+                        <input type="text" id="capture-device" placeholder="hw:0,2">
+                    </div>
+                    <div class="form-group">
+                        <label for="playback-device">Playback Device</label>
+                        <input type="text" id="playback-device" placeholder="hw:0,0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="latency">Latency (µs)</label>
+                        <input type="number" id="latency" min="1000" max="100000" step="1000">
+                    </div>
+                    <div class="form-group">
+                        <label for="sample-rate">Sample Rate</label>
+                        <select id="sample-rate">
+                            <option value="44100">44100 Hz</option>
+                            <option value="48000">48000 Hz</option>
+                            <option value="96000">96000 Hz</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="sample-format">Sample Format</label>
+                        <select id="sample-format">
+                            <option value="S16_LE">S16_LE (16-bit)</option>
+                            <option value="S24_LE">S24_LE (24-bit)</option>
+                            <option value="S32_LE">S32_LE (32-bit)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="channels">Channels</label>
+                        <select id="channels">
+                            <option value="2">2 (Stereo)</option>
+                            <option value="6">6 (5.1)</option>
+                            <option value="8">8 (7.1)</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- HDCP Settings -->
+            <section class="settings-section">
+                <h2>HDCP Settings</h2>
+                <div class="alert alert-warning">
+                    <strong>Note:</strong> HDCP is disabled by default as this device lacks HDCP keys.
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="hdcp-enabled">
+                        Enable HDCP
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="hdcp-version">HDCP Version</label>
+                    <select id="hdcp-version">
+                        <option value="auto">Auto</option>
+                        <option value="1.4">HDCP 1.4</option>
+                        <option value="2.2">HDCP 2.2</option>
+                    </select>
+                </div>
+            </section>
+
+            <!-- Debug Settings -->
+            <section class="settings-section">
+                <h2>Advanced</h2>
+                <div class="form-group">
+                    <label for="trace-level">Trace Level</label>
+                    <select id="trace-level">
+                        <option value="0">Off</option>
+                        <option value="1">Low</option>
+                        <option value="2">Medium</option>
+                        <option value="3">High (Verbose)</option>
+                    </select>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <button id="apply-btn" class="btn btn-primary">Apply Changes</button>
+            <button id="reset-btn" class="btn btn-secondary">Reset to Defaults</button>
+        </footer>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="streambox-config.js"></script>
+</body>
+
+</html>

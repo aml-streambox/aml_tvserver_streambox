@@ -1,0 +1,23 @@
+{
+    "video": {
+        "game_mode": 2,
+        "vrr_mode": 2,
+        "hdmi_source": "HDMI2"
+    },
+    "audio": {
+        "enabled": true,
+        "capture_device": "hw:0,2",
+        "playback_device": "hw:0,0",
+        "latency_us": 10000,
+        "sample_format": "S16_LE",
+        "channels": 2,
+        "sample_rate": 48000
+    },
+    "hdcp": {
+        "enabled": false,
+        "version": "auto"
+    },
+    "debug": {
+        "trace_level": 0
+    }
+}
