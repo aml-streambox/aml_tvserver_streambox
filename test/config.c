@@ -517,14 +517,17 @@ void config_cleanup(void)
 
 int config_get_source_input(const char *source_str)
 {
+    /* SOURCE_HDMI1 = 5, SOURCE_HDMI2 = 6, SOURCE_HDMI3 = 7, SOURCE_HDMI4 = 8
+     * See TvCommon.h tv_source_input_t enum
+     */
     if (source_str == NULL) {
-        return 1; /* SOURCE_HDMI2 */
+        return 6; /* SOURCE_HDMI2 */
     }
 
-    if (strcmp(source_str, "HDMI1") == 0) return 0;
-    if (strcmp(source_str, "HDMI2") == 0) return 1;
-    if (strcmp(source_str, "HDMI3") == 0) return 2;
-    if (strcmp(source_str, "HDMI4") == 0) return 3;
+    if (strcmp(source_str, "HDMI1") == 0) return 5;  /* SOURCE_HDMI1 */
+    if (strcmp(source_str, "HDMI2") == 0) return 6;  /* SOURCE_HDMI2 */
+    if (strcmp(source_str, "HDMI3") == 0) return 7;  /* SOURCE_HDMI3 */
+    if (strcmp(source_str, "HDMI4") == 0) return 8;  /* SOURCE_HDMI4 */
 
-    return 1; /* Default: SOURCE_HDMI2 */
+    return 6; /* Default: SOURCE_HDMI2 */
 }
