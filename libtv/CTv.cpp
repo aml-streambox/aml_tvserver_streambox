@@ -433,6 +433,9 @@ void CTv::onSigVrrChange(void)
     TvEvent::SignalVrrEvent event;
     event.cur_vrr_status = vrrparm.cur_vrr_status;
     sendTvEvent(event);
+    
+    // Check and apply Auto VRR logic (Switch between Force VRR and Normal VRR)
+    CheckAndApplyAutoVrr();
 }
 
 int CTv::GetVrrMode() {
@@ -928,6 +931,9 @@ void CTv::onSigToStable()
     event.mDviFlag = mCurrentSignalInfo.is_dvi;
     event.mhdr_info = mCurrentSignalInfo.signal_type;
     sendTvEvent(event);
+    
+    // Check and apply Auto VRR logic
+    CheckAndApplyAutoVrr();
 }
 
 void CTv::onSigToUnstable()
@@ -1227,6 +1233,40 @@ int CTv::SetForceVrrFrameLock(int enable)
         LOGE("%s: Failed to %s force VRR frame lock\n", __FUNCTION__, enable ? "enable" : "disable");
     }
     return ret;
+}
+
+int CTv::SetHdmiTxVrrMode(int mode)
+{
+    LOGD("%s: mode=%d\n", __FUNCTION__, mode);
+    char buf[16];
+    sprintf(buf, "%d", mode);
+    return tvWriteSysfs(HDMI_TX_VRR_MODE_PATH, buf);
+}
+
+void CTv::CheckAndApplyAutoVrr()
+{
+    vdin_vrr_freesync_param_s vrrparm;
+    int ret = mpTvin->VDIN_GetVrrFreesyncParm(&vrrparm);
+    if (ret < 0) {
+        LOGE("%s: VDIN_GetVrrFreesyncParm failed ret=%d\n", __FUNCTION__, ret);
+        return;
+    }
+
+    LOGD("%s: cur_vrr_status=%d\n", __FUNCTION__, vrrparm.cur_vrr_status);
+
+    if (vrrparm.cur_vrr_status != VDIN_VRR_OFF) {
+        // RX has VRR -> Use Normal HDMI TX VRR (Send EMP)
+        // Disable Force Lock first
+        SetForceVrrFrameLock(0);
+        // Enable HDMI TX VRR (Game Mode = 1)
+        SetHdmiTxVrrMode(1);
+    } else {
+        // RX has NO VRR -> Use Force VRR (Internal Low Latency)
+        // Disable HDMI TX VRR
+        SetHdmiTxVrrMode(0);
+        // Enable Force Lock
+        SetForceVrrFrameLock(1);
+    }
 }
 #endif
 

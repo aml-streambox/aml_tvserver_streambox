@@ -36,6 +36,7 @@
 
 // VRR force frame lock for HDMI passthrough low latency mode
 #define VRR_DEBUG_PATH        "/sys/class/aml_vrr/vrr2/debug"
+#define HDMI_TX_VRR_MODE_PATH "/sys/class/amhdmitx/amhdmitx0/vrr_mode"
 class CTv : public CTvDevicesPollDetect::ISourceConnectObserver {
 public:
     class TvIObserver {
@@ -113,6 +114,8 @@ private:
     bool mATVDisplaySnow;
 
 protected:
+    int SetHdmiTxVrrMode(int mode);
+    void CheckAndApplyAutoVrr();
     class CTvMsgQueue: public CMsgQueueThread {
     public:
         static const int TV_MSG_ENABLE_VIDEO_LATER = 9;
