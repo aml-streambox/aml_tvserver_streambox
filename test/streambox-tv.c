@@ -34,6 +34,15 @@ static struct TvClientWrapper_t *g_pTvClientWrapper = NULL;
 /* HDMI TX HPD state sysfs path */
 #define HDMI_TX_HPD_STATE_PATH "/sys/class/amhdmitx/amhdmitx0/hpd_state"
 
+/* HDMI TX HDR control sysfs paths */
+#define HDMI_TX_TEST_ATTR_PATH "/sys/class/amhdmitx/amhdmitx0/test_attr"
+#define HDMI_TX_CONFIG_PATH    "/sys/class/amhdmitx/amhdmitx0/config"
+
+/* HDMI RX HDR info sysfs paths */
+#define HDMI_RX_COLORSPACE_PATH   "/sys/class/hdmirx/hdmirx0/colorspace"
+#define HDMI_RX_HDR_STATUS_PATH   "/sys/class/hdmirx/hdmirx0/hdmi_hdr_status"
+
+
 /* HDMI TX HPD monitoring state */
 static int g_hdmitx_connected = 0;   /* 0=disconnected, 1=connected */
 static int g_tv_started = 0;         /* 0=stopped, 1=started */
@@ -581,7 +590,86 @@ static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size
     return 0;
 }
 
+/* --- HDMI TX HDR Synchronization --- */
+
+static void SynchronizeHdmitxHdr(void)
+{
+    char rx_colorspace[64] = {0};
+    char rx_hdr_status[64] = {0};
+    char tx_attr[32] = {0};
+    const char *tx_hdr_cmd = "sdr";
+    int ret;
+
+    TRACE(2, "SynchronizeHdmitxHdr() ENTRY\n");
+
+    /* Read RX colorspace (e.g., "422" or "444" or "rgb") */
+    ret = ReadSysfs(HDMI_RX_COLORSPACE_PATH, rx_colorspace, sizeof(rx_colorspace));
+    if (ret != 0) {
+        LOGD("%s: Failed to read RX colorspace, using default\n", __FUNCTION__);
+        strcpy(rx_colorspace, "422");
+    }
+    LOGD("%s: RX colorspace: %s\n", __FUNCTION__, rx_colorspace);
+
+    /* Read RX HDR status (e.g., "SDR", "HDR10-GAMMA_ST2084", "HDR10-GAMMA_HLG", etc.) */
+    ret = ReadSysfs(HDMI_RX_HDR_STATUS_PATH, rx_hdr_status, sizeof(rx_hdr_status));
+    if (ret != 0) {
+        LOGD("%s: Failed to read RX HDR status, assuming SDR\n", __FUNCTION__);
+        strcpy(rx_hdr_status, "SDR");
+    }
+    LOGD("%s: RX HDR status: %s\n", __FUNCTION__, rx_hdr_status);
+
+    /* Determine TX HDR command based on RX HDR status */
+    if (strstr(rx_hdr_status, "HDR10Plus") != NULL || strstr(rx_hdr_status, "HDR10+") != NULL) {
+        tx_hdr_cmd = "hdr10+";
+    } else if (strstr(rx_hdr_status, "HLG") != NULL) {
+        tx_hdr_cmd = "hlg";
+    } else if (strstr(rx_hdr_status, "DolbyVision-Lowlatency") != NULL) {
+        tx_hdr_cmd = "vsif41";
+    } else if (strstr(rx_hdr_status, "DolbyVision-Std") != NULL) {
+        tx_hdr_cmd = "vsif11";
+    } else if (strstr(rx_hdr_status, "DolbyVision") != NULL) {
+        tx_hdr_cmd = "vsif41";  /* Default to low latency DV */
+    } else if (strstr(rx_hdr_status, "HDR10") != NULL || strstr(rx_hdr_status, "SMPTE") != NULL) {
+        tx_hdr_cmd = "hdr";
+    } else {
+        tx_hdr_cmd = "sdr";
+    }
+
+    /* For HDR modes, we need to set up 10-bit color depth */
+    if (strcmp(tx_hdr_cmd, "sdr") != 0) {
+        /* Build TX attribute string: colorspace,10bit */
+        if (strstr(rx_colorspace, "422") != NULL) {
+            snprintf(tx_attr, sizeof(tx_attr), "422,10bit");
+        } else if (strstr(rx_colorspace, "444") != NULL) {
+            snprintf(tx_attr, sizeof(tx_attr), "444,10bit");
+        } else if (strstr(rx_colorspace, "420") != NULL) {
+            snprintf(tx_attr, sizeof(tx_attr), "420,10bit");
+        } else {
+            /* Default to 422,10bit for HDR compatibility */
+            snprintf(tx_attr, sizeof(tx_attr), "422,10bit");
+        }
+
+        /* Set TX color format/depth */
+        LOGD("%s: Setting TX test_attr to: %s\n", __FUNCTION__, tx_attr);
+        ret = WriteSysfs(HDMI_TX_TEST_ATTR_PATH, tx_attr);
+        if (ret != 0) {
+            LOGD("%s: Failed to set TX test_attr\n", __FUNCTION__);
+        }
+        usleep(10000); /* 10ms delay */
+    }
+
+    /* Set TX HDR mode */
+    LOGD("%s: Setting TX HDR config to: %s\n", __FUNCTION__, tx_hdr_cmd);
+    ret = WriteSysfs(HDMI_TX_CONFIG_PATH, tx_hdr_cmd);
+    if (ret != 0) {
+        LOGD("%s: Failed to set TX HDR config\n", __FUNCTION__);
+    }
+
+    TRACE(2, "SynchronizeHdmitxHdr() EXIT\n");
+}
+
 /* --- HDMI TX/RX Synchronization --- */
+
 
 static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper)
 {
@@ -667,6 +755,9 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
         if (video->game_mode == 2) {
             ApplyVrrMode(video->vrr_mode);
         }
+
+        /* Synchronize HDR mode from HDMI RX to TX */
+        SynchronizeHdmitxHdr();
     } else {
         LOGD("%s: Failed to set hdmitx mode to: %s\n", __FUNCTION__, mode_str);
     }
