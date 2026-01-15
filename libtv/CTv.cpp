@@ -1210,14 +1210,18 @@ int CTv::SetPcMode(int enable)
     return mpTvin->Tvin_SetPcMode(enable ? 1 : 0);
 }
 
-int CTv::SetForceVrrFrameLock(int enable)
+int CTv::SetForceVrrFrameLock(int mode)
 {
-    LOGD("%s: enable=%d\n", __FUNCTION__, enable);
+    LOGD("%s: mode=%d\n", __FUNCTION__, mode);
     int ret = 0;
 
-    if (enable) {
-        // Enable low latency frame lock mode first, then enable VRR
-        ret = tvWriteSysfs(VRR_DEBUG_PATH, "mode 1");
+    if (mode > 0) {
+        // Enable VRR with specific mode
+        // mode 1: Low Latency Force Lock
+        // mode 2: Normal VRR Bug Fix
+        char buf[32];
+        snprintf(buf, sizeof(buf), "mode %d", mode);
+        ret = tvWriteSysfs(VRR_DEBUG_PATH, buf);
         if (ret >= 0) {
             ret = tvWriteSysfs(VRR_DEBUG_PATH, "en 1");
         }
@@ -1230,7 +1234,7 @@ int CTv::SetForceVrrFrameLock(int enable)
     }
 
     if (ret < 0) {
-        LOGE("%s: Failed to %s force VRR frame lock\n", __FUNCTION__, enable ? "enable" : "disable");
+        LOGE("%s: Failed to %s force VRR frame lock\n", __FUNCTION__, mode ? "enable" : "disable");
     }
     return ret;
 }
@@ -1254,17 +1258,26 @@ void CTv::CheckAndApplyAutoVrr()
 
     LOGD("%s: cur_vrr_status=%d\n", __FUNCTION__, vrrparm.cur_vrr_status);
 
-    if (vrrparm.cur_vrr_status != VDIN_VRR_OFF) {
-        // RX has VRR -> Use Normal HDMI TX VRR (Send EMP)
-        // Disable Force Lock first
-        SetForceVrrFrameLock(0);
-        // Enable HDMI TX VRR (Game Mode = 1)
+    // CRITICAL FIX: Only check VDIN_VRR_BASIC (actual VTEM VRR_EN bit from EMP packet)
+    // Do NOT react to FREESYNC status, as PS5 advertises FreeSync capability
+    // even when NOT running VRR content, causing false positives.
+    if (vrrparm.cur_vrr_status == VDIN_VRR_BASIC) {
+        // RX is actively sending VRR EMP packets -> Use Normal HDMI TX VRR
+        LOGD("%s: Detected active VRR EMP, enabling Normal VRR mode (Internal Mode 2 + TX EMP)\n", __FUNCTION__);
+        
+        // 1. Enable Internal VRR Mode 2 (Bug workaround for Normal VRR)
+        SetForceVrrFrameLock(2);
+        
+        // 2. Enable HDMI TX VRR (Send EMP)
         SetHdmiTxVrrMode(1);
     } else {
-        // RX has NO VRR -> Use Force VRR (Internal Low Latency)
-        // Disable HDMI TX VRR
+        // RX is NOT sending VRR EMP -> Use Force VRR (Internal Low Latency)
+        LOGD("%s: No active VRR EMP (status=%d), enabling Force VRR mode\n", __FUNCTION__, vrrparm.cur_vrr_status);
+        
+        // Disable HDMI TX VRR first (this sends OFF packet in kernel)
         SetHdmiTxVrrMode(0);
-        // Enable Force Lock
+        
+        // Enable Force VRR (Mode 1)
         SetForceVrrFrameLock(1);
     }
 }
