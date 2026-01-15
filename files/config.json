@@ -8,7 +8,7 @@
         "enabled": true,
         "capture_device": "hw:0,2",
         "playback_device": "hw:0,0",
-        "latency_us": 10000,
+        "latency_us": 20000,
         "sample_format": "S16_LE",
         "channels": 2,
         "sample_rate": 48000
