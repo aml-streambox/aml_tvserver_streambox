@@ -596,9 +596,11 @@ static void SynchronizeHdmitxHdr(void)
 {
     char rx_colorspace[64] = {0};
     char rx_hdr_status[64] = {0};
-    char tx_attr[32] = {0};
+    char tx_attr[64] = {0};
     const char *tx_hdr_cmd = "sdr";
+    const char *bit_depth_str = "8bit";
     int ret;
+    int rx_color_depth = 8;
 
     TRACE(2, "SynchronizeHdmitxHdr() ENTRY\n");
 
@@ -610,6 +612,16 @@ static void SynchronizeHdmitxHdr(void)
     }
     LOGD("%s: RX colorspace: %s\n", __FUNCTION__, rx_colorspace);
 
+    /* Read RX color depth from tvserver */
+    if (g_pTvClientWrapper != NULL) {
+        rx_color_depth = GetCurrentSourceColorDepth(g_pTvClientWrapper);
+        if (rx_color_depth <= 0) {
+            LOGD("%s: Failed to get RX color depth, using default 8-bit\n", __FUNCTION__);
+            rx_color_depth = 8;
+        }
+    }
+    LOGD("%s: RX color depth: %d bits\n", __FUNCTION__, rx_color_depth);
+
     /* Read RX HDR status (e.g., "SDR", "HDR10-GAMMA_ST2084", "HDR10-GAMMA_HLG", etc.) */
     ret = ReadSysfs(HDMI_RX_HDR_STATUS_PATH, rx_hdr_status, sizeof(rx_hdr_status));
     if (ret != 0) {
@@ -619,44 +631,67 @@ static void SynchronizeHdmitxHdr(void)
     LOGD("%s: RX HDR status: %s\n", __FUNCTION__, rx_hdr_status);
 
     /* Determine TX HDR command based on RX HDR status */
+    int is_hdr = 0;
     if (strstr(rx_hdr_status, "HDR10Plus") != NULL || strstr(rx_hdr_status, "HDR10+") != NULL) {
         tx_hdr_cmd = "hdr10+";
+        is_hdr = 1;
     } else if (strstr(rx_hdr_status, "HLG") != NULL) {
         tx_hdr_cmd = "hlg";
+        is_hdr = 1;
     } else if (strstr(rx_hdr_status, "DolbyVision-Lowlatency") != NULL) {
         tx_hdr_cmd = "vsif41";
+        is_hdr = 1;
     } else if (strstr(rx_hdr_status, "DolbyVision-Std") != NULL) {
         tx_hdr_cmd = "vsif11";
+        is_hdr = 1;
     } else if (strstr(rx_hdr_status, "DolbyVision") != NULL) {
         tx_hdr_cmd = "vsif41";  /* Default to low latency DV */
+        is_hdr = 1;
     } else if (strstr(rx_hdr_status, "HDR10") != NULL || strstr(rx_hdr_status, "SMPTE") != NULL) {
         tx_hdr_cmd = "hdr";
+        is_hdr = 1;
     } else {
         tx_hdr_cmd = "sdr";
+        is_hdr = 0;
     }
 
-    /* For HDR modes, we need to set up 10-bit color depth */
-    if (strcmp(tx_hdr_cmd, "sdr") != 0) {
-        /* Build TX attribute string: colorspace,10bit */
-        if (strstr(rx_colorspace, "422") != NULL) {
-            snprintf(tx_attr, sizeof(tx_attr), "422,10bit");
-        } else if (strstr(rx_colorspace, "444") != NULL) {
-            snprintf(tx_attr, sizeof(tx_attr), "444,10bit");
-        } else if (strstr(rx_colorspace, "420") != NULL) {
-            snprintf(tx_attr, sizeof(tx_attr), "420,10bit");
-        } else {
-            /* Default to 422,10bit for HDR compatibility */
-            snprintf(tx_attr, sizeof(tx_attr), "422,10bit");
-        }
-
-        /* Set TX color format/depth */
-        LOGD("%s: Setting TX test_attr to: %s\n", __FUNCTION__, tx_attr);
-        ret = WriteSysfs(HDMI_TX_TEST_ATTR_PATH, tx_attr);
-        if (ret != 0) {
-            LOGD("%s: Failed to set TX test_attr\n", __FUNCTION__);
-        }
-        usleep(10000); /* 10ms delay */
+    /* 
+     * Determine bit depth string based on RX color depth.
+     * For HDR, minimum is 10-bit. For SDR, pass through as-is.
+     */
+    if (rx_color_depth >= 12) {
+        bit_depth_str = "12bit";
+    } else if (rx_color_depth >= 10 || is_hdr) {
+        bit_depth_str = "10bit";  /* HDR requires at least 10-bit */
+    } else {
+        bit_depth_str = "8bit";
     }
+
+    /* 
+     * Always sync colorspace and bit depth to match RX.
+     * Build TX attribute string: colorspace,bitdepth
+     */
+    if (strstr(rx_colorspace, "422") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "422,%s", bit_depth_str);
+    } else if (strstr(rx_colorspace, "444") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "444,%s", bit_depth_str);
+    } else if (strstr(rx_colorspace, "420") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "420,%s", bit_depth_str);
+    } else if (strstr(rx_colorspace, "rgb") != NULL || strstr(rx_colorspace, "RGB") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "rgb,%s", bit_depth_str);
+    } else {
+        /* Default: fallback to rgb with detected bit depth */
+        LOGD("%s: Unknown colorspace '%s', using rgb,%s\n", __FUNCTION__, rx_colorspace, bit_depth_str);
+        snprintf(tx_attr, sizeof(tx_attr), "rgb,%s", bit_depth_str);
+    }
+
+    /* Set TX color format/depth */
+    LOGD("%s: Setting TX test_attr to: %s\n", __FUNCTION__, tx_attr);
+    ret = WriteSysfs(HDMI_TX_TEST_ATTR_PATH, tx_attr);
+    if (ret != 0) {
+        LOGD("%s: Failed to set TX test_attr\n", __FUNCTION__);
+    }
+    usleep(10000); /* 10ms delay */
 
     /* Set TX HDR mode */
     LOGD("%s: Setting TX HDR config to: %s\n", __FUNCTION__, tx_hdr_cmd);
