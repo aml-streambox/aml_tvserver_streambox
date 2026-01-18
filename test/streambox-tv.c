@@ -20,10 +20,32 @@
 #include <pthread.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <TvClientWrapper.h>
 #include <CTvClientLog.h>
 
 #include "config.h"
+
+#ifdef STREAM_BOX
+#include "amvideo.h"
+
+/* Video layer status enum */
+typedef enum video_layer_status_e {
+    VIDEO_LAYER_STATUS_ENABLE,
+    VIDEO_LAYER_STATUS_DISABLE,
+    VIDEO_LAYER_STATUS_ENABLE_AND_CLEAN,
+    VIDEO_LAYER_STATUS_MAX,
+} video_layer_status_t;
+
+/* Video global output mode enum */
+typedef enum video_global_output_mode_e {
+    VIDEO_GLOBAL_OUTPUT_MODE_DISABLE,
+    VIDEO_GLOBAL_OUTPUT_MODE_ENABLE,
+    VIDEO_GLOBAL_OUTPUT_MODE_MAX,
+} video_global_output_mode_t;
+#endif
+
+#define AM_VIDEO_PATH           "/dev/amvideo"
 
 static int run = 1;
 static struct TvClientWrapper_t *g_pTvClientWrapper = NULL;
@@ -109,9 +131,115 @@ static int ReadSysfs(const char *path, char *buf, size_t buf_size)
     if (bytes_read > 0 && buf[bytes_read - 1] == '\n') {
         buf[bytes_read - 1] = '\0';
     }
-
     return 0;
 }
+
+#ifdef STREAM_BOX
+static int AmVideoOpen(void)
+{
+    int fd = open(AM_VIDEO_PATH, O_RDWR);
+    if (fd < 0) {
+        LOGE("Open %s error(%s)!\n", AM_VIDEO_PATH, strerror(errno));
+    }
+    return fd;
+}
+
+static int AmVideoDeviceIOCtl(int fd, int request, ...)
+{
+    int ret = -1;
+    va_list ap;
+    void *arg;
+    va_start(ap, request);
+    arg = va_arg(ap, void *);
+    va_end(ap);
+    ret = ioctl(fd, request, arg);
+    return ret;
+}
+
+static int SetVideoLayerStatus(int fd, int status)
+{
+    int ret = -1;
+    ret = AmVideoDeviceIOCtl(fd, AMSTREAM_IOC_SET_VIDEO_DISABLE, &status);
+    if (ret < 0) {
+        LOGE("%s: SetVideoLayerStatus status=%d failed\n", __FUNCTION__, status);
+    } else {
+        LOGD("%s: SetVideoLayerStatus status=%d success\n", __FUNCTION__, status);
+    }
+    return ret;
+}
+
+static int SetVideoGlobalOutputMode(int fd, int mode)
+{
+    int ret = -1;
+    ret = AmVideoDeviceIOCtl(fd, AMSTREAM_IOC_GLOBAL_SET_VIDEO_OUTPUT, &mode);
+    if (ret < 0) {
+        LOGE("%s: SetVideoGlobalOutputMode mode=%d failed\n", __FUNCTION__, mode);
+    } else {
+        LOGD("%s: SetVideoGlobalOutputMode mode=%d success\n", __FUNCTION__, mode);
+    }
+    return ret;
+}
+
+static int ClearVideo(int fd)
+{
+    int ret = -1;
+    int clear_cmd = 0;
+    ret = AmVideoDeviceIOCtl(fd, AMSTREAM_IOC_CLEAR_VIDEO, &clear_cmd);
+    if (ret < 0) {
+        LOGE("%s: ClearVideo failed\n", __FUNCTION__);
+    } else {
+        LOGD("%s: ClearVideo success\n", __FUNCTION__);
+    }
+    return ret;
+}
+
+static int ClearVideoBuffer(int fd)
+{
+    int ret = -1;
+    ret = AmVideoDeviceIOCtl(fd, AMSTREAM_IOC_CLEAR_VBUF, 0);
+    if (ret < 0) {
+        LOGE("%s: ClearVideoBuffer failed\n", __FUNCTION__);
+    } else {
+        LOGD("%s: ClearVideoBuffer success\n", __FUNCTION__);
+    }
+    return ret;
+}
+
+static int ResetVideoPipeline(void)
+{
+    int amvideo_fd = -1;
+    int ret = 0;
+
+    LOGD("%s: Resetting video pipeline for resolution change\n", __FUNCTION__);
+
+    amvideo_fd = AmVideoOpen();
+    if (amvideo_fd < 0) {
+        LOGE("%s: Failed to open amvideo device\n", __FUNCTION__);
+        return -1;
+    }
+
+    ret |= SetVideoLayerStatus(amvideo_fd, VIDEO_LAYER_STATUS_DISABLE);
+    ret |= SetVideoGlobalOutputMode(amvideo_fd, VIDEO_GLOBAL_OUTPUT_MODE_DISABLE);
+    usleep(10000);
+
+    ret |= ClearVideo(amvideo_fd);
+    ret |= ClearVideoBuffer(amvideo_fd);
+    usleep(50000);
+
+    ret |= SetVideoLayerStatus(amvideo_fd, VIDEO_LAYER_STATUS_ENABLE);
+    ret |= SetVideoGlobalOutputMode(amvideo_fd, VIDEO_GLOBAL_OUTPUT_MODE_ENABLE);
+
+    close(amvideo_fd);
+
+    if (ret == 0) {
+        LOGD("%s: Video pipeline reset complete\n", __FUNCTION__);
+    } else {
+        LOGE("%s: Video pipeline reset failed with errors\n", __FUNCTION__);
+    }
+
+    return ret;
+}
+#endif
 
 /* --- Audio Passthrough --- */
 
@@ -590,119 +718,6 @@ static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size
     return 0;
 }
 
-/* --- HDMI TX HDR Synchronization --- */
-
-static void SynchronizeHdmitxHdr(void)
-{
-    char rx_colorspace[64] = {0};
-    char rx_hdr_status[64] = {0};
-    char tx_attr[64] = {0};
-    const char *tx_hdr_cmd = "sdr";
-    const char *bit_depth_str = "8bit";
-    int ret;
-    int rx_color_depth = 8;
-
-    TRACE(2, "SynchronizeHdmitxHdr() ENTRY\n");
-
-    /* Read RX colorspace (e.g., "422" or "444" or "rgb") */
-    ret = ReadSysfs(HDMI_RX_COLORSPACE_PATH, rx_colorspace, sizeof(rx_colorspace));
-    if (ret != 0) {
-        LOGD("%s: Failed to read RX colorspace, using default\n", __FUNCTION__);
-        strcpy(rx_colorspace, "422");
-    }
-    LOGD("%s: RX colorspace: %s\n", __FUNCTION__, rx_colorspace);
-
-    /* Read RX color depth from tvserver */
-    if (g_pTvClientWrapper != NULL) {
-        rx_color_depth = GetCurrentSourceColorDepth(g_pTvClientWrapper);
-        if (rx_color_depth <= 0) {
-            LOGD("%s: Failed to get RX color depth, using default 8-bit\n", __FUNCTION__);
-            rx_color_depth = 8;
-        }
-    }
-    LOGD("%s: RX color depth: %d bits\n", __FUNCTION__, rx_color_depth);
-
-    /* Read RX HDR status (e.g., "SDR", "HDR10-GAMMA_ST2084", "HDR10-GAMMA_HLG", etc.) */
-    ret = ReadSysfs(HDMI_RX_HDR_STATUS_PATH, rx_hdr_status, sizeof(rx_hdr_status));
-    if (ret != 0) {
-        LOGD("%s: Failed to read RX HDR status, assuming SDR\n", __FUNCTION__);
-        strcpy(rx_hdr_status, "SDR");
-    }
-    LOGD("%s: RX HDR status: %s\n", __FUNCTION__, rx_hdr_status);
-
-    /* Determine TX HDR command based on RX HDR status */
-    int is_hdr = 0;
-    if (strstr(rx_hdr_status, "HDR10Plus") != NULL || strstr(rx_hdr_status, "HDR10+") != NULL) {
-        tx_hdr_cmd = "hdr10+";
-        is_hdr = 1;
-    } else if (strstr(rx_hdr_status, "HLG") != NULL) {
-        tx_hdr_cmd = "hlg";
-        is_hdr = 1;
-    } else if (strstr(rx_hdr_status, "DolbyVision-Lowlatency") != NULL) {
-        tx_hdr_cmd = "vsif41";
-        is_hdr = 1;
-    } else if (strstr(rx_hdr_status, "DolbyVision-Std") != NULL) {
-        tx_hdr_cmd = "vsif11";
-        is_hdr = 1;
-    } else if (strstr(rx_hdr_status, "DolbyVision") != NULL) {
-        tx_hdr_cmd = "vsif41";  /* Default to low latency DV */
-        is_hdr = 1;
-    } else if (strstr(rx_hdr_status, "HDR10") != NULL || strstr(rx_hdr_status, "SMPTE") != NULL) {
-        tx_hdr_cmd = "hdr";
-        is_hdr = 1;
-    } else {
-        tx_hdr_cmd = "sdr";
-        is_hdr = 0;
-    }
-
-    /* 
-     * Determine bit depth string based on RX color depth.
-     * For HDR, minimum is 10-bit. For SDR, pass through as-is.
-     */
-    if (rx_color_depth >= 12) {
-        bit_depth_str = "12bit";
-    } else if (rx_color_depth >= 10 || is_hdr) {
-        bit_depth_str = "10bit";  /* HDR requires at least 10-bit */
-    } else {
-        bit_depth_str = "8bit";
-    }
-
-    /* 
-     * Always sync colorspace and bit depth to match RX.
-     * Build TX attribute string: colorspace,bitdepth
-     */
-    if (strstr(rx_colorspace, "422") != NULL) {
-        snprintf(tx_attr, sizeof(tx_attr), "422,%s", bit_depth_str);
-    } else if (strstr(rx_colorspace, "444") != NULL) {
-        snprintf(tx_attr, sizeof(tx_attr), "444,%s", bit_depth_str);
-    } else if (strstr(rx_colorspace, "420") != NULL) {
-        snprintf(tx_attr, sizeof(tx_attr), "420,%s", bit_depth_str);
-    } else if (strstr(rx_colorspace, "rgb") != NULL || strstr(rx_colorspace, "RGB") != NULL) {
-        snprintf(tx_attr, sizeof(tx_attr), "rgb,%s", bit_depth_str);
-    } else {
-        /* Default: fallback to rgb with detected bit depth */
-        LOGD("%s: Unknown colorspace '%s', using rgb,%s\n", __FUNCTION__, rx_colorspace, bit_depth_str);
-        snprintf(tx_attr, sizeof(tx_attr), "rgb,%s", bit_depth_str);
-    }
-
-    /* Set TX color format/depth */
-    LOGD("%s: Setting TX test_attr to: %s\n", __FUNCTION__, tx_attr);
-    ret = WriteSysfs(HDMI_TX_TEST_ATTR_PATH, tx_attr);
-    if (ret != 0) {
-        LOGD("%s: Failed to set TX test_attr\n", __FUNCTION__);
-    }
-    usleep(10000); /* 10ms delay */
-
-    /* Set TX HDR mode */
-    LOGD("%s: Setting TX HDR config to: %s\n", __FUNCTION__, tx_hdr_cmd);
-    ret = WriteSysfs(HDMI_TX_CONFIG_PATH, tx_hdr_cmd);
-    if (ret != 0) {
-        LOGD("%s: Failed to set TX HDR config\n", __FUNCTION__);
-    }
-
-    TRACE(2, "SynchronizeHdmitxHdr() EXIT\n");
-}
-
 /* --- HDMI TX/RX Synchronization --- */
 
 
@@ -717,7 +732,7 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
 
     TRACE(2, "SynchronizeHdmitxToHdmirx() ENTRY\n");
 
-    usleep(100000); /* 100ms delay */
+    usleep(100000);
 
     int rx_width = GetCurrentSourceFrameWidth(pTvClientWrapper);
     int rx_height = GetCurrentSourceFrameHeight(pTvClientWrapper);
@@ -730,6 +745,81 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     }
 
     LOGD("%s: HDMIRX input: %dx%d@%dHz\n", __FUNCTION__, rx_width, rx_height, rx_fps);
+
+    char rx_colorspace[64] = {0};
+    char rx_hdr_status[64] = {0};
+    char tx_attr[64] = {0};
+    const char *tx_hdr_cmd = "sdr";
+    const char *bit_depth_str = "8bit";
+    int rx_color_depth = 8;
+    int is_hdr = 0;
+
+    ret = ReadSysfs(HDMI_RX_COLORSPACE_PATH, rx_colorspace, sizeof(rx_colorspace));
+    if (ret != 0) {
+        LOGD("%s: Failed to read RX colorspace, using default\n", __FUNCTION__);
+        strcpy(rx_colorspace, "422");
+    }
+    LOGD("%s: RX colorspace: %s\n", __FUNCTION__, rx_colorspace);
+
+    if (g_pTvClientWrapper != NULL) {
+        rx_color_depth = GetCurrentSourceColorDepth(g_pTvClientWrapper);
+        if (rx_color_depth <= 0) {
+            LOGD("%s: Failed to get RX color depth, using default 8-bit\n", __FUNCTION__);
+            rx_color_depth = 8;
+        }
+    }
+    LOGD("%s: RX color depth: %d bits\n", __FUNCTION__, rx_color_depth);
+
+    ret = ReadSysfs(HDMI_RX_HDR_STATUS_PATH, rx_hdr_status, sizeof(rx_hdr_status));
+    if (ret != 0) {
+        LOGD("%s: Failed to read RX HDR status, assuming SDR\n", __FUNCTION__);
+        strcpy(rx_hdr_status, "SDR");
+    }
+    LOGD("%s: RX HDR status: %s\n", __FUNCTION__, rx_hdr_status);
+
+    if (strstr(rx_hdr_status, "HDR10Plus") != NULL || strstr(rx_hdr_status, "HDR10+") != NULL) {
+        tx_hdr_cmd = "hdr10+";
+        is_hdr = 1;
+    } else if (strstr(rx_hdr_status, "HLG") != NULL) {
+        tx_hdr_cmd = "hlg";
+        is_hdr = 1;
+    } else if (strstr(rx_hdr_status, "DolbyVision-Lowlatency") != NULL) {
+        tx_hdr_cmd = "vsif41";
+        is_hdr = 1;
+    } else if (strstr(rx_hdr_status, "DolbyVision-Std") != NULL) {
+        tx_hdr_cmd = "vsif11";
+        is_hdr = 1;
+    } else if (strstr(rx_hdr_status, "DolbyVision") != NULL) {
+        tx_hdr_cmd = "vsif41";
+        is_hdr = 1;
+    } else if (strstr(rx_hdr_status, "HDR10") != NULL || strstr(rx_hdr_status, "SMPTE") != NULL) {
+        tx_hdr_cmd = "hdr";
+        is_hdr = 1;
+    } else {
+        tx_hdr_cmd = "sdr";
+        is_hdr = 0;
+    }
+
+    if (rx_color_depth >= 12) {
+        bit_depth_str = "12bit";
+    } else if (rx_color_depth >= 10 || is_hdr) {
+        bit_depth_str = "10bit";
+    } else {
+        bit_depth_str = "8bit";
+    }
+
+    if (strstr(rx_colorspace, "422") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "422,%s", bit_depth_str);
+    } else if (strstr(rx_colorspace, "444") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "444,%s", bit_depth_str);
+    } else if (strstr(rx_colorspace, "420") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "420,%s", bit_depth_str);
+    } else if (strstr(rx_colorspace, "rgb") != NULL || strstr(rx_colorspace, "RGB") != NULL) {
+        snprintf(tx_attr, sizeof(tx_attr), "rgb,%s", bit_depth_str);
+    } else {
+        LOGD("%s: Unknown colorspace '%s', using rgb,%s\n", __FUNCTION__, rx_colorspace, bit_depth_str);
+        snprintf(tx_attr, sizeof(tx_attr), "rgb,%s", bit_depth_str);
+    }
 
     int fine_tune_framerate = 0;
 #ifdef STREAM_BOX
@@ -779,20 +869,34 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     usleep(10000);
 
     WriteSysfs(hdmitx_disp_mode_path, "off");
-    usleep(50000);
+    usleep(500000);
+
+    LOGD("%s: Setting TX test_attr to: %s (must be set BEFORE disp_mode for 4K HDR)\n", __FUNCTION__, tx_attr);
+    ret = WriteSysfs(HDMI_TX_TEST_ATTR_PATH, tx_attr);
+    if (ret != 0) {
+        LOGD("%s: Failed to set TX test_attr\n", __FUNCTION__);
+    }
+    usleep(10000);
 
     ret = WriteSysfs(hdmitx_disp_mode_path, mode_str);
     if (ret == 0) {
         LOGD("%s: Successfully set hdmitx mode to: %s\n", __FUNCTION__, mode_str);
         usleep(200000);
 
-        /* Apply VRR mode from config */
+        LOGD("%s: Setting TX HDR config to: %s\n", __FUNCTION__, tx_hdr_cmd);
+        ret = WriteSysfs(HDMI_TX_CONFIG_PATH, tx_hdr_cmd);
+        if (ret != 0) {
+            LOGD("%s: Failed to set TX HDR config\n", __FUNCTION__);
+        }
+        usleep(10000);
+
+#ifdef STREAM_BOX
+    ResetVideoPipeline();
+    usleep(100000);
+#endif
         if (video->game_mode == 2) {
             ApplyVrrMode(video->vrr_mode);
         }
-
-        /* Synchronize HDR mode from HDMI RX to TX */
-        SynchronizeHdmitxHdr();
     } else {
         LOGD("%s: Failed to set hdmitx mode to: %s\n", __FUNCTION__, mode_str);
     }
