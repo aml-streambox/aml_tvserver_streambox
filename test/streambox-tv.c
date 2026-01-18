@@ -746,6 +746,9 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
 
     LOGD("%s: HDMIRX input: %dx%d@%dHz\n", __FUNCTION__, rx_width, rx_height, rx_fps);
 
+    StopAudioPassthrough();
+    LOGD("%s: Audio passthrough stopped before resolution change\n", __FUNCTION__);
+
     char rx_colorspace[64] = {0};
     char rx_hdr_status[64] = {0};
     char tx_attr[64] = {0};
@@ -894,9 +897,17 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     ResetVideoPipeline();
     usleep(100000);
 #endif
-        if (video->game_mode == 2) {
-            ApplyVrrMode(video->vrr_mode);
-        }
+
+    if (video->game_mode == 2) {
+        ApplyVrrMode(video->vrr_mode);
+    }
+
+    LOGD("%s: Waiting for HDMI TX to stabilize before restarting audio...\n", __FUNCTION__);
+    usleep(500000);
+
+    LOGD("%s: HDMI TX stable, restarting audio passthrough\n", __FUNCTION__);
+    StartAudioPassthrough();
+    LOGD("%s: Audio passthrough restarted after HDMI TX stabilization\n", __FUNCTION__);
     } else {
         LOGD("%s: Failed to set hdmitx mode to: %s\n", __FUNCTION__, mode_str);
     }
@@ -926,7 +937,6 @@ static void TvEventCallback(event_type_t eventType, void *eventData)
         if (signalDetectEvent->SignalStatus == TVIN_SIG_STATUS_STABLE && g_pTvClientWrapper != NULL) {
             LOGD("%s: HDMIRX input change detected (stable signal), synchronizing HDMITX\n", __FUNCTION__);
             SynchronizeHdmitxToHdmirx(g_pTvClientWrapper);
-            StartAudioPassthrough();
         } else if (signalDetectEvent->SignalStatus != TVIN_SIG_STATUS_STABLE) {
             LOGD("%s: HDMIRX signal not stable (status=%d), stopping audio passthrough\n",
                  __FUNCTION__, signalDetectEvent->SignalStatus);
