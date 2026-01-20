@@ -1249,6 +1249,13 @@ int CTv::SetHdmiTxVrrMode(int mode)
 
 void CTv::CheckAndApplyAutoVrr()
 {
+    // Only apply auto VRR logic if VRR is enabled
+    int vrrEnabled = mpHDMIRxManager->GetVrrEnabled();
+    if (vrrEnabled <= 0) {
+        LOGD("%s: VRR not enabled, skipping auto VRR logic\n", __FUNCTION__);
+        return;
+    }
+
     vdin_vrr_freesync_param_s vrrparm;
     int ret = mpTvin->VDIN_GetVrrFreesyncParm(&vrrparm);
     if (ret < 0) {
@@ -1271,13 +1278,14 @@ void CTv::CheckAndApplyAutoVrr()
         // 2. Enable HDMI TX VRR (Send EMP)
         SetHdmiTxVrrMode(1);
     } else {
-        // RX is NOT sending VRR EMP -> Use Force VRR (Internal Low Latency)
-        LOGD("%s: No active VRR EMP (status=%d), enabling Force VRR mode\n", __FUNCTION__, vrrparm.cur_vrr_status);
+        // RX is NOT sending VRR EMP -> Use Force VRR (Internal Low Latency only, NO TX EMP)
+        LOGD("%s: No active VRR EMP (status=%d), enabling Force VRR mode (NO TX EMP)\n", __FUNCTION__, vrrparm.cur_vrr_status);
         
-        // Disable HDMI TX VRR first (this sends OFF packet in kernel)
-        SetHdmiTxVrrMode(0);
+        // CRITICAL FIX: Do NOT call SetHdmiTxVrrMode(0) here!
+        // That causes the kernel to send a VRR OFF EMP packet.
+        // For force VRR mode, we should completely skip TX VRR control.
         
-        // Enable Force VRR (Mode 1)
+        // Only enable internal Force VRR for low latency
         SetForceVrrFrameLock(1);
     }
 }
