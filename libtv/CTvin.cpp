@@ -589,6 +589,16 @@ int CTvin::Tvin_StartDecoder(tvin_info_t info)
     } else {
         mTvinParam.info = info;
 
+        /*
+         * Disable double-write (AFBCE + shrunk MIF) so vdin0 writes
+         * full-resolution uncompressed MIF frames.  Without this,
+         * 4K input is decimated 4x (3840x2160 → 960x540) in the MIF
+         * path and the AFBCE-compressed buffer is unusable by
+         * downstream GPU/encoder consumers.
+         * Must be set before every TVIN_IOC_START_DEC.
+         */
+        tvWriteSysfs("/sys/class/vdin/vdin0/attr", "double_write 0");
+
         if (VDIN_StartDec(&mTvinParam) >= 0 ) {
             LOGD("StartDecoder succeed.\n");
             mDecoderStarted = true;
@@ -773,10 +783,15 @@ int CTvin::Tvin_AddVideoPath(int selPath)
     std::string vdinPath;
     std::string suffixVideoPath("deinterlace amvideo");
     bool amlvideo2Exist = isFileExist(AMLVIDEO2_DEV_PATH);
+    bool vfmCapExist = isFileExist("/dev/video_cap");
     switch ( selPath ) {
     case TV_PATH_VDIN_AMLVIDEO2_PPMGR_DEINTERLACE_AMVIDEO:
-        if (amlvideo2Exist)
+        if (amlvideo2Exist && vfmCapExist)
+            vdinPath = "add tvpath vdin0 vfm_cap amlvideo2.0 ";
+        else if (amlvideo2Exist)
             vdinPath = "add tvpath vdin0 amlvideo2.0 ";
+        else if (vfmCapExist)
+            vdinPath = "add tvpath vdin0 vfm_cap ";
         else
             vdinPath = "add tvpath vdin0 ";
         break;

@@ -704,6 +704,8 @@ static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size
         else if (fps >= 29 && fps <= 30) rounded_fps = 30;
         else if (fps >= 23 && fps <= 24) rounded_fps = 24;
         else if (fps >= 119 && fps <= 120) rounded_fps = 120;
+        else if (fps >= 143 && fps <= 144) rounded_fps = 144;
+        else if (fps >= 239 && fps <= 240) rounded_fps = 240;
         else {
             rounded_fps = (fps + 1) / 2 * 2;
             if (rounded_fps < fps) rounded_fps = fps;
@@ -711,6 +713,8 @@ static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size
     } else {
         if (fps >= 50 && fps < 60) rounded_fps = 60;
         else if (fps >= 100 && fps < 120) rounded_fps = 120;
+        else if (fps >= 130 && fps < 144) rounded_fps = 144;
+        else if (fps >= 200 && fps < 240) rounded_fps = 240;
         else if (fps >= 24 && fps < 30) rounded_fps = 30;
     }
 
@@ -840,6 +844,8 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
         else if (rx_fps >= 29 && rx_fps <= 30) rounded_fps = 30;
         else if (rx_fps >= 23 && rx_fps <= 24) rounded_fps = 24;
         else if (rx_fps >= 119 && rx_fps <= 120) rounded_fps = 120;
+        else if (rx_fps >= 143 && rx_fps <= 144) rounded_fps = 144;
+        else if (rx_fps >= 239 && rx_fps <= 240) rounded_fps = 240;
         else {
             rounded_fps = (rx_fps + 1) / 2 * 2;
             if (rounded_fps < rx_fps) rounded_fps = rx_fps;
@@ -847,6 +853,8 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     } else {
         if (rx_fps >= 50 && rx_fps < 60) rounded_fps = 60;
         else if (rx_fps >= 100 && rx_fps < 120) rounded_fps = 120;
+        else if (rx_fps >= 130 && rx_fps < 144) rounded_fps = 144;
+        else if (rx_fps >= 200 && rx_fps < 240) rounded_fps = 240;
         else if (rx_fps >= 24 && rx_fps < 30) rounded_fps = 30;
     }
 
