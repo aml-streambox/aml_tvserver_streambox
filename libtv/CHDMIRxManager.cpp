@@ -707,6 +707,78 @@ int CHDMIRxManager::ReadEdidFromHdmiTx(unsigned char *edidData, int maxSize)
     return 0;
 }
 
+int CHDMIRxManager::PatchEdidMonitorName(unsigned char *edidData, int edidSize)
+{
+    if (edidData == NULL || edidSize < 128) {
+        LOGE("%s: Invalid EDID data or size\n", __FUNCTION__);
+        return -1;
+    }
+
+    // Read the downstream display's EDID from HDMI TX
+    unsigned char txEdid[REAL_EDID_DATA_SIZE] = {0};
+    int ret = ReadEdidFromHdmiTx(txEdid, REAL_EDID_DATA_SIZE);
+    if (ret < 0) {
+        LOGD("%s: No HDMI TX EDID available (no display connected?), keeping original name\n", __FUNCTION__);
+        return 0; // Not an error -- just keep the original name
+    }
+
+    // Find the Monitor Name descriptor (tag 0xFC) in the TX EDID base block.
+    // EDID base block has 4 descriptor slots at offsets 0x36, 0x48, 0x5A, 0x6C,
+    // each 18 bytes long. A display descriptor (non-DTD) has bytes 0-1 == 0x00,0x00
+    // and byte 3 is the tag: 0xFC = Monitor Name.
+    int txNameOffset = -1;
+    for (int off = 0x36; off <= 0x6C; off += 18) {
+        if (txEdid[off] == 0x00 && txEdid[off + 1] == 0x00 &&
+            txEdid[off + 3] == 0xFC) {
+            txNameOffset = off;
+            break;
+        }
+    }
+
+    if (txNameOffset < 0) {
+        LOGD("%s: HDMI TX EDID has no Monitor Name descriptor, keeping original name\n", __FUNCTION__);
+        return 0;
+    }
+
+    // Find the Monitor Name descriptor in the RX EDID base block
+    int rxNameOffset = -1;
+    for (int off = 0x36; off <= 0x6C; off += 18) {
+        if (edidData[off] == 0x00 && edidData[off + 1] == 0x00 &&
+            edidData[off + 3] == 0xFC) {
+            rxNameOffset = off;
+            break;
+        }
+    }
+
+    if (rxNameOffset < 0) {
+        LOGD("%s: RX EDID has no Monitor Name descriptor, cannot patch\n", __FUNCTION__);
+        return 0;
+    }
+
+    // Copy the 13-byte name payload from TX to RX.
+    // The name field is bytes 5-17 of the descriptor (13 bytes).
+    // Format: ASCII chars terminated by 0x0A ('\n'), padded with 0x20 (' ').
+    memcpy(edidData + rxNameOffset + 5, txEdid + txNameOffset + 5, 13);
+
+    // Log the patched name (extract for debugging)
+    char nameStr[14] = {0};
+    for (int i = 0; i < 13; i++) {
+        unsigned char c = edidData[rxNameOffset + 5 + i];
+        if (c == 0x0A) break; // newline terminator
+        nameStr[i] = (char)c;
+    }
+    LOGD("%s: Patched EDID monitor name to '%s' from HDMI TX\n", __FUNCTION__, nameStr);
+
+    // Recalculate base block checksum (bytes 0-126, checksum at byte 127)
+    unsigned char checksum = 0;
+    for (int i = 0; i < 127; i++) {
+        checksum += edidData[i];
+    }
+    edidData[127] = 256 - checksum;
+
+    return 0;
+}
+
 int CHDMIRxManager::PassthroughEdidFromTxToRx(int port)
 {
     LOGD("%s: Passing through EDID from HDMI TX to HDMI RX port %d\n", __FUNCTION__, port);

@@ -74,6 +74,7 @@ public:
     int GetVrrEnabled();
 #ifdef STREAM_BOX
     int PatchEdidFor120Hz(unsigned char *edidData, int edidSize);
+    int PatchEdidMonitorName(unsigned char *edidData, int edidSize);
     int ReadEdidFromHdmiTx(unsigned char *edidData, int maxSize);
     int PassthroughEdidFromTxToRx(int port);
 #endif

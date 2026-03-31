@@ -590,13 +590,25 @@ int CTvin::Tvin_StartDecoder(tvin_info_t info)
         mTvinParam.info = info;
 
         /*
-         * Disable double-write (AFBCE + shrunk MIF) so vdin0 writes
-         * full-resolution uncompressed MIF frames.  Without this,
-         * 4K input is decimated 4x (3840x2160 → 960x540) in the MIF
-         * path and the AFBCE-compressed buffer is unusable by
-         * downstream GPU/encoder consumers.
-         * Must be set before every TVIN_IOC_START_DEC.
+         * Disable AFBCE (Amlogic Frame Buffer Compression Encoder) and
+         * double-write so vdin0 writes full-resolution uncompressed
+         * MIF frames.  The DTS defaults (afbce_bit_mode=0x11,
+         * double_write_en) cause 4K input to be decimated 4x
+         * (3840→960, 2160→540) in the MIF path because double-write
+         * stores a shrunk copy while AFBCE stores the full-size
+         * compressed frame — but downstream GPU/encoder consumers
+         * need the uncompressed full-resolution MIF buffer.
+         *
+         * afbce_flag must be cleared FIRST because the kernel's
+         * vdin_double_write_confirm() only enables double_wr when
+         * both double_wr_cfg AND afbce_valid are true.  Clearing
+         * afbce_flag ensures afbce_valid=0 at the next session start.
+         *
+         * Must be set before every TVIN_IOC_START_DEC since the
+         * kernel reinitializes these from DTS defaults on each
+         * decoder start.
          */
+        tvWriteSysfs("/sys/class/vdin/vdin0/attr", "afbce_flag 0");
         tvWriteSysfs("/sys/class/vdin/vdin0/attr", "double_write 0");
 
         if (VDIN_StartDec(&mTvinParam) >= 0 ) {

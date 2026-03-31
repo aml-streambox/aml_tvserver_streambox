@@ -643,6 +643,10 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
             mpHDMIRxManager->PatchEdidFor120Hz(
                 (unsigned char *)(edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE),
                 REAL_EDID_DATA_SIZE);
+            // Patch monitor name from HDMI TX connected display's EDID
+            mpHDMIRxManager->PatchEdidMonitorName(
+                (unsigned char *)(edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE),
+                REAL_EDID_DATA_SIZE);
 #endif
         }
     }
