@@ -844,8 +844,22 @@ int CTv::GetFrontendInfo(tvin_frontend_info_t *frontendInfo)
         LOGD("%s: param is NULL.\n", __FUNCTION__);
     } else {
         ret = mpTvin->Tvin_GetFrontendInfo(frontendInfo);
-        /*LOGD("%s: scan mode:%d, colorfmt:%d, fps:%d, width:%d, height:%d, colordepth:%d.\n", __FUNCTION__, frontendInfo->scan_mode, frontendInfo->cfmt,
-            frontendInfo->fps,frontendInfo->width,frontendInfo->height,frontendInfo->colordepth);*/
+
+        char buf[SYS_STR_LEN+1] = {0};
+        int actual_fps = 0;
+        if (tvReadSysfs("/sys/class/hdmirx/hdmirx0/info", buf) > 0) {
+            char *fps_line = strstr(buf, "Frame Rate:");
+            if (fps_line) {
+                if (sscanf(fps_line, "Frame Rate: %d", &actual_fps) == 1 && actual_fps > 0) {
+                    int rounded_fps = (actual_fps + 50) / 100;
+                    if (rounded_fps > 0 && rounded_fps != frontendInfo->fps) {
+                        LOGD("%s: overriding fps from kernel %d to actual %d (raw %d)\n",
+                             __FUNCTION__, frontendInfo->fps, rounded_fps, actual_fps);
+                        frontendInfo->fps = rounded_fps;
+                    }
+                }
+            }
+        }
     }
 
     if (ret < 0) {
