@@ -215,20 +215,20 @@ int CTv::StartTv(tv_source_input_t source)
 #endif
     mCurrentSource = source;
 #ifdef HAVE_AUDIO
-    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to create audio patch\n", __FUNCTION__);
     fflush(stdout);
 #endif
     CTvAudio::getInstance()->create_audio_patch(mapSourcetoAudiotupe(source));
 #ifndef STREAM_BOX_LEGACY
+    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to set audio av mute\n", __FUNCTION__);
     fflush(stdout);
 #endif
     CTvAudio::getInstance()->set_audio_av_mute(true);
+    } /* !mHeadlessMode — av_mute only needed when TX connected */
 #endif
-    } /* !mHeadlessMode */
 #endif
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: EXIT, returning ret = %d\n", __FUNCTION__, ret);
@@ -251,20 +251,20 @@ int CTv::StopTv(tv_source_input_t source)
     }
 
 #ifdef HAVE_AUDIO
-    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to release audio patch\n", __FUNCTION__);
     fflush(stdout);
 #endif
     CTvAudio::getInstance()->release_audio_patch();
 #ifndef STREAM_BOX_LEGACY
+    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to set audio av mute false\n", __FUNCTION__);
     fflush(stdout);
 #endif
     CTvAudio::getInstance()->set_audio_av_mute(false);
+    } /* !mHeadlessMode — av_mute only needed when TX connected */
 #endif
-    } /* !mHeadlessMode */
 #endif
     if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
