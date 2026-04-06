@@ -619,6 +619,14 @@ int TvClient::SetPcMode(bool enable)
     sprintf(buf, "hdmi.%d.%d", HDMI_SET_PC_MODE, enable?1:0);
     return SendMethodCall(buf);
 }
+
+int TvClient::SetHeadlessMode(bool headless)
+{
+    LOGD("%s: %s\n", __FUNCTION__, headless?"headless":"normal");
+    char buf[32] = {0};
+    sprintf(buf, "control.%d.%d", TV_CONTROL_SET_HEADLESS_MODE, headless?1:0);
+    return SendMethodCall(buf);
+}
 #endif
 
 status_t TvClient::onTransact(uint32_t code,

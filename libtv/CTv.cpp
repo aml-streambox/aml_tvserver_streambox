@@ -145,6 +145,34 @@ CTv::~CTv()
     UnloadConfigFile();
 }
 
+int CTv::SetHeadlessMode(bool headless)
+{
+    LOGD("%s: headless = %d (was %d)\n", __FUNCTION__, headless, mHeadlessMode);
+    if (headless == mHeadlessMode) {
+        return 0;
+    }
+    mHeadlessMode = headless;
+    if (headless) {
+        /* Switch VFM path to capture-only (no display pipeline) */
+        mpTvin->Tvin_RemoveVideoPath(TV_PATH_TYPE_TVIN);
+        int ret = mpTvin->Tvin_AddVideoPath(TV_PATH_VDIN_VFMCAP_ONLY);
+        if (ret < 0) {
+            LOGE("%s: failed to set capture-only VFM path!\n", __FUNCTION__);
+            mHeadlessMode = false;
+            /* Restore original path */
+            mpTvin->Tvin_AddVideoPath(TV_PATH_VDIN_AMLVIDEO2_PPMGR_DEINTERLACE_AMVIDEO);
+            return -1;
+        }
+        LOGD("%s: VFM path set to vdin0 -> vfm_cap (capture-only)\n", __FUNCTION__);
+    } else {
+        /* Restore full display pipeline */
+        mpTvin->Tvin_RemoveVideoPath(TV_PATH_TYPE_TVIN);
+        mpTvin->Tvin_AddVideoPath(TV_PATH_VDIN_AMLVIDEO2_PPMGR_DEINTERLACE_AMVIDEO);
+        LOGD("%s: VFM path restored to full display pipeline\n", __FUNCTION__);
+    }
+    return 0;
+}
+
 int CTv::StartTv(tv_source_input_t source)
 {
     LOGD("%s: source = %d!\n", __FUNCTION__, source);
@@ -158,6 +186,7 @@ int CTv::StartTv(tv_source_input_t source)
     LOGD("%s: new source is %d! RETURN\n", __FUNCTION__,source);
     return ret;
     }
+    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to write VIDEO_FREERUN_MODE\n", __FUNCTION__);
     fflush(stdout);
@@ -168,6 +197,7 @@ int CTv::StartTv(tv_source_input_t source)
     fflush(stdout);
 #endif
     CVpp::getInstance()->setVideoaxis();//when open source set video axis full screen
+    } /* !mHeadlessMode */
 
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to get source port\n", __FUNCTION__);
@@ -185,6 +215,7 @@ int CTv::StartTv(tv_source_input_t source)
 #endif
     mCurrentSource = source;
 #ifdef HAVE_AUDIO
+    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to create audio patch\n", __FUNCTION__);
     fflush(stdout);
@@ -197,6 +228,7 @@ int CTv::StartTv(tv_source_input_t source)
 #endif
     CTvAudio::getInstance()->set_audio_av_mute(true);
 #endif
+    } /* !mHeadlessMode */
 #endif
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: EXIT, returning ret = %d\n", __FUNCTION__, ret);
@@ -219,6 +251,7 @@ int CTv::StopTv(tv_source_input_t source)
     }
 
 #ifdef HAVE_AUDIO
+    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to release audio patch\n", __FUNCTION__);
     fflush(stdout);
@@ -231,7 +264,9 @@ int CTv::StopTv(tv_source_input_t source)
 #endif
     CTvAudio::getInstance()->set_audio_av_mute(false);
 #endif
+    } /* !mHeadlessMode */
 #endif
+    if (!mHeadlessMode) {
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to disable video layer\n", __FUNCTION__);
     fflush(stdout);
@@ -242,10 +277,19 @@ int CTv::StopTv(tv_source_input_t source)
     fflush(stdout);
 #endif
     mpAmVideo->SetVideoGlobalOutputMode(VIDEO_GLOBAL_OUTPUT_MODE_DISABLE);
+    } /* !mHeadlessMode */
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to stop decoder\n", __FUNCTION__);
     fflush(stdout);
 #endif
+    /*
+     * Force-clear any stale vdin0 kernel state left by a previous
+     * unclean shutdown (SIGKILL).  Without this, TVIN_IOC_START_DEC
+     * returns -EBUSY because the kernel still has VDIN_FLAG_DEC_STARTED
+     * set from the old process.  Tvin_StopDecoder() alone won't help
+     * because it checks mDecoderStarted (false in a fresh process).
+     */
+    mpTvin->Tvin_ForceResetDecoder();
     mpTvin->Tvin_StopDecoder();
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: About to get source port\n", __FUNCTION__);
@@ -919,26 +963,25 @@ int CTv::SetEdidBoostOn(int bBoostOn)
 
 void CTv::onSigToStable()
 {
-    LOGD("%s: mVdinWorkMode is %d\n", __FUNCTION__, mVdinWorkMode);
+    LOGD("%s: mVdinWorkMode is %d, mHeadlessMode is %d\n", __FUNCTION__, mVdinWorkMode, mHeadlessMode);
     //start decoder
-    /*if (mVdinWorkMode == VDIN_WORK_MODE_VFM) {
-        mpTvin->Tvin_StartDecoder(mCurrentSignalInfo);
-    } else {
-        LOGD("%s: not VFM mode.\n", __FUNCTION__);
-    }*/
     mpTvin->Tvin_StartDecoder(mCurrentSignalInfo);
 
 #ifdef HAVE_AUDIO
 #ifndef STREAM_BOX_LEGACY
+    if (!mHeadlessMode) {
             CTvAudio::getInstance()->set_audio_av_mute(false);
+    }
 #endif
 #endif
 
-    CMessage msg;
-    msg.mDelayMs = std::chrono::milliseconds(0);
-    msg.mType = CTvMsgQueue::TV_MSG_ENABLE_VIDEO_LATER;
-    msg.mpPara[0] = 5;
-    mTvMsgQueue->sendMsg ( msg );
+    if (!mHeadlessMode) {
+        CMessage msg;
+        msg.mDelayMs = std::chrono::milliseconds(0);
+        msg.mType = CTvMsgQueue::TV_MSG_ENABLE_VIDEO_LATER;
+        msg.mpPara[0] = 5;
+        mTvMsgQueue->sendMsg ( msg );
+    }
 
     //send signal to apk
     TvEvent::SignalDetectEvent event;
@@ -950,18 +993,24 @@ void CTv::onSigToStable()
     event.mhdr_info = mCurrentSignalInfo.signal_type;
     sendTvEvent(event);
     
-    // Check and apply Auto VRR logic
-    CheckAndApplyAutoVrr();
+    if (!mHeadlessMode) {
+        // Check and apply Auto VRR logic
+        CheckAndApplyAutoVrr();
+    }
 }
 
 void CTv::onSigToUnstable()
 {
-    mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
+    if (!mHeadlessMode) {
+        mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
+    }
     mpTvin->Tvin_StopDecoder();
 
 #ifdef HAVE_AUDIO
 #ifndef STREAM_BOX_LEGACY
+    if (!mHeadlessMode) {
             CTvAudio::getInstance()->set_audio_av_mute(true);
+    }
 #endif
 #endif
 
@@ -973,12 +1022,16 @@ void CTv::onSigToUnSupport()
 {
     LOGD("%s\n", __FUNCTION__);
 
-    mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
+    if (!mHeadlessMode) {
+        mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
+    }
     mpTvin->Tvin_StopDecoder();
 
 #ifdef HAVE_AUDIO
 #ifndef STREAM_BOX_LEGACY
+    if (!mHeadlessMode) {
             CTvAudio::getInstance()->set_audio_av_mute(true);
+    }
 #endif
 #endif
 
@@ -997,12 +1050,12 @@ void CTv::onSigToNoSig()
 {
     LOGD("%s\n", __FUNCTION__);
 
-    if (needSnowEffect()) {
+    if (!mHeadlessMode && needSnowEffect()) {
         SetSnowShowEnable(true);
         mpTvin->Tvin_StartDecoder(mCurrentSignalInfo);
         mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_ENABLE);
 
-    }  else {
+    }  else if (!mHeadlessMode) {
         LOGD("%s video layer has disabled \n", __FUNCTION__);
         mpAmVideo->SetVideoLayerStatus(VIDEO_LAYER_STATUS_DISABLE);
         mpTvin->Tvin_StopDecoder();
@@ -1012,6 +1065,9 @@ void CTv::onSigToNoSig()
         CTvAudio::getInstance()->set_audio_av_mute(true);
     #endif
     #endif
+    } else {
+        /* Headless mode: just stop decoder, no display operations */
+        mpTvin->Tvin_StopDecoder();
     }
 
     TvEvent::SignalDetectEvent event;
@@ -1310,6 +1366,7 @@ void CTv::CheckAndApplyAutoVrr()
 #endif
 
 void CTv::muteVideoOnHDMISource() {
+    if (mHeadlessMode) return;
     if (mCurrentSource < SOURCE_HDMI1 || mCurrentSource > SOURCE_HDMI4) {
         return;
     }
@@ -1318,6 +1375,10 @@ void CTv::muteVideoOnHDMISource() {
 
 void CTv::isVideoFrameAvailable(unsigned int u32NewFrameCount)
 {
+    if (mHeadlessMode) {
+        LOGD("%s: skipped in headless mode\n", __FUNCTION__);
+        return;
+    }
     unsigned int u32TimeOutCount = 0;
     unsigned int  frameCount = 0;
     while (true) {

@@ -202,6 +202,11 @@ public:
     {
         return mpTvClient->SetPcMode(enable ? true : false);
     }
+
+    int SetHeadlessMode(int headless)
+    {
+        return mpTvClient->SetHeadlessMode(headless ? true : false);
+    }
 #endif
 
     void onTvClientEvent(CTvEvent &event) {
@@ -450,6 +455,11 @@ int SetGameMode(struct TvClientWrapper_t *pTvClientWrapper, int enable, int game
 int SetPcMode(struct TvClientWrapper_t *pTvClientWrapper, int enable)
 {
     return pTvClientWrapper->tvClientWrapper.SetPcMode(enable);
+}
+
+int SetHeadlessMode(struct TvClientWrapper_t *pTvClientWrapper, int headless)
+{
+    return pTvClientWrapper->tvClientWrapper.SetHeadlessMode(headless);
 }
 #endif
 

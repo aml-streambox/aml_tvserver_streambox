@@ -79,6 +79,8 @@ public:
     int GetHdmiAllmEnabled();
     int SetHdmiVrrEnabled(int enable);
     int GetHdmiVrrEnabled();
+    int SetHeadlessMode(bool headless);
+    bool GetHeadlessMode() { return mHeadlessMode; }
 #ifdef STREAM_BOX
     int SetGameMode(int enable, int game_mode_value = 3);
     int SetPcMode(int enable);
@@ -112,6 +114,7 @@ private:
     int mBoostOn = 0;
     int mDolbyVisionEnableState = 0;
     bool mATVDisplaySnow;
+    bool mHeadlessMode = false;
 
 protected:
     int SetHdmiTxVrrMode(int mode);

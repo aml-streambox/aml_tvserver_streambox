@@ -657,6 +657,47 @@ int CTvin::Tvin_StopDecoder()
     }
 }
 
+void CTvin::Tvin_ForceResetDecoder()
+{
+    /*
+     * Unconditionally issue STOP_DEC + CLOSE to clear any stale kernel
+     * state left by a previous unclean shutdown (e.g. SIGKILL).
+     *
+     * When the old process is killed without calling TVIN_IOC_STOP_DEC,
+     * the kernel vdin0 driver retains VDIN_FLAG_DEC_STARTED (0x02) and
+     * VDIN_FLAG_DEC_OPENED (0x04) in devp->flags.  The new process's
+     * Tvin_StopDecoder() skips the ioctl because mDecoderStarted is
+     * false (freshly constructed), so the stale kernel flags persist.
+     * A subsequent TVIN_IOC_START_DEC then returns -EBUSY because the
+     * kernel thinks the decoder is already running.
+     *
+     * We ignore errors here: STOP_DEC returns -EPERM if not started,
+     * CLOSE returns -EPERM if not opened — both are harmless.
+     */
+    LOGD("%s: forcing STOP_DEC + CLOSE to clear any stale vdin0 state\n",
+         __FUNCTION__);
+
+    int ret = VDIN_DeviceIOCtl(TVIN_IOC_STOP_DEC);
+    if (ret < 0) {
+        LOGD("%s: STOP_DEC returned %d (%s) — OK if not started\n",
+             __FUNCTION__, ret, strerror(errno));
+    } else {
+        LOGD("%s: STOP_DEC succeeded — cleared stale DEC_STARTED\n",
+             __FUNCTION__);
+    }
+
+    ret = VDIN_DeviceIOCtl(TVIN_IOC_CLOSE);
+    if (ret < 0) {
+        LOGD("%s: CLOSE returned %d (%s) — OK if not opened\n",
+             __FUNCTION__, ret, strerror(errno));
+    } else {
+        LOGD("%s: CLOSE succeeded — cleared stale DEC_OPENED\n",
+             __FUNCTION__);
+    }
+
+    mDecoderStarted = false;
+}
+
 int CTvin::Tvin_SwitchSnow(bool enable)
 {
     int ret = -1;
@@ -814,6 +855,17 @@ int CTvin::Tvin_AddVideoPath(int selPath)
         else
             vdinPath = "add default decoder ppmgr ";
         break;
+
+    case TV_PATH_VDIN_VFMCAP_ONLY:
+        if (vfmCapExist) {
+            vdinPath = "add tvpath vdin0 vfm_cap";
+            ret = VDIN_AddPath(vdinPath.c_str());
+            return ret; /* skip suffixVideoPath append */
+        } else {
+            LOGE("TV_PATH_VDIN_VFMCAP_ONLY requested but vfm_cap device not found!\n");
+            return -1;
+        }
+
     default:
         break;
     }

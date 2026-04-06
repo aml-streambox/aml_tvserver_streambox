@@ -88,6 +88,7 @@ public:
 #ifdef STREAM_BOX
     int SetGameMode(bool enable, int game_mode_value = 3);
     int SetPcMode(bool enable);
+    int SetHeadlessMode(bool headless);
 #endif
 
 private:

@@ -65,6 +65,7 @@ typedef enum tv_path_status_e {
 enum {
     TV_PATH_VDIN_AMLVIDEO2_PPMGR_DEINTERLACE_AMVIDEO,
     TV_PATH_DECODER_AMLVIDEO2_PPMGR_DEINTERLACE_AMVIDEO,
+    TV_PATH_VDIN_VFMCAP_ONLY,
 };
 
 #define VDIN_DEV_PATH               "/dev/vdin0"
@@ -81,6 +82,7 @@ public:
     int Tvin_ClosePort(tvin_port_t source_port);
     int Tvin_StartDecoder(tvin_info_t info);
     int Tvin_StopDecoder(void);
+    void Tvin_ForceResetDecoder(void);
     int Tvin_SwitchSnow(bool enable);
     int Tvin_GetSignalEventInfo(vdin_event_info_s *SignalEventInfo);
     int Tvin_GetSignalInfo(tvin_info_s *SignalInfo);

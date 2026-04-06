@@ -75,6 +75,7 @@ static struct TvClientWrapper_t *g_pTvClientWrapper = NULL;
 
 /* HDMI TX HPD monitoring state */
 static int g_hdmitx_connected = 0;   /* 0=disconnected, 1=connected */
+static int g_headless_mode = 0;      /* 0=normal (TX connected), 1=headless (capture-only) */
 static int g_tv_started = 0;         /* 0=stopped, 1=started */
 static int g_uevent_fd = -1;         /* Netlink socket for uevent */
 static pthread_t g_uevent_thread;    /* Uevent monitor thread */
@@ -1986,7 +1987,7 @@ static void StartTvProcessing(struct TvClientWrapper_t *pTvClientWrapper)
          __FUNCTION__, video->game_mode, video->vrr_mode, video->hdmi_source);
 
 #ifdef STREAM_BOX
-    if (video->game_mode > 0) {
+    if (video->game_mode > 0 && !g_headless_mode) {
         int ret;
 
         /* Enable ALLM (Auto Low Latency Mode) - always enabled */
@@ -2418,6 +2419,18 @@ static void TvEventCallback(event_type_t eventType, void *eventData)
                                                    signalDetectEvent->SignalStatus,
                                                    signalDetectEvent->isDviSignal);
 
+        if (g_headless_mode) {
+            /* Headless mode: log signal status, skip TX sync/display/audio */
+            if (signalDetectEvent->SignalStatus == TVIN_SIG_STATUS_STABLE) {
+                LOGE("%s: [HEADLESS] Stable signal detected (fmt=%d), capture active\n",
+                     __FUNCTION__, signalDetectEvent->SignalFmt);
+            } else {
+                LOGE("%s: [HEADLESS] Signal not stable (status=%d)\n",
+                     __FUNCTION__, signalDetectEvent->SignalStatus);
+            }
+            return;
+        }
+
         if (g_force_no_signal_ui) {
             StartNoSignalUi("forced-test-mode");
             StopAudioPassthrough();
@@ -2439,7 +2452,7 @@ static void TvEventCallback(event_type_t eventType, void *eventData)
         LOGE("%s: source: %d, connectStatus: %d\n", __FUNCTION__,
                   sourceConnectEvent->SourceInput, sourceConnectEvent->ConnectionState);
 
-        if (!g_force_no_signal_ui && sourceConnectEvent->ConnectionState == 0) {
+        if (!g_headless_mode && !g_force_no_signal_ui && sourceConnectEvent->ConnectionState == 0) {
             StartNoSignalUi("source-disconnected");
             StopAudioPassthrough();
         }
@@ -2449,7 +2462,9 @@ static void TvEventCallback(event_type_t eventType, void *eventData)
 static void signal_handler(int s)
 {
     run = 0;
-    WriteSysfs("/sys/class/graphics/fb0/blank", "0");
+    if (!g_headless_mode) {
+        WriteSysfs("/sys/class/graphics/fb0/blank", "0");
+    }
     signal(s, SIG_DFL);
     raise(s);
 }
@@ -2571,8 +2586,14 @@ int main(int argc, char **argv) {
     g_hdmitx_connected = (GetHdmiTxHpdState() == 1);
     LOGD("Initial HDMI TX state: %s\n", g_hdmitx_connected ? "connected" : "disconnected");
 
-    /* Wait for HDMI TX connection */
+    /* Auto-detect headless mode: if no HDMI TX, enter headless capture-only mode */
     if (!g_hdmitx_connected) {
+        g_headless_mode = 1;
+        LOGD("*** HEADLESS MODE: No HDMI TX detected, entering capture-only mode ***\n");
+    }
+
+    /* Wait for HDMI TX connection (only in normal mode) */
+    if (!g_hdmitx_connected && !g_headless_mode) {
         LOGD("Waiting for HDMI TX connection...\n");
         while (run && !g_hdmitx_connected) {
             if (g_uevent_fd >= 0) {
@@ -2602,14 +2623,26 @@ int main(int argc, char **argv) {
     g_pTvClientWrapper = pTvClientWrapper;
 
     setTvEventCallback(TvEventCallback);
+
+    /* Set headless mode in library layer before any TV operations */
+    if (g_headless_mode) {
+        LOGD("Setting headless mode in library layer\n");
+        SetHeadlessMode(pTvClientWrapper, 1);
+    }
     
     tv_source_input_t source = (tv_source_input_t)config_get_source_input(cfg->video.hdmi_source);
     StopTv(pTvClientWrapper, source);
     sleep(1);
 
-    DisplayInit();
+    if (!g_headless_mode) {
+        DisplayInit();
+    }
 
-    if (test_no_signal_ui) {
+    if (g_headless_mode) {
+        /* Headless: just start TV processing (capture), no display or UI */
+        LOGD("Headless mode: starting capture-only TV processing\n");
+        StartTvProcessing(pTvClientWrapper);
+    } else if (test_no_signal_ui) {
         g_force_no_signal_ui = 1;
         StartNoSignalUi("cli-test-mode");
     } else {
@@ -2617,8 +2650,8 @@ int main(int argc, char **argv) {
         UpdateNoSignalUiFromCurrentSource(pTvClientWrapper, "startup-check");
     }
 
-    /* Start uevent monitor thread */
-    if (g_uevent_fd >= 0) {
+    /* Start uevent monitor thread (not needed in headless mode) */
+    if (!g_headless_mode && g_uevent_fd >= 0) {
         if (pthread_create(&g_uevent_thread, NULL, UeventMonitorThread, pTvClientWrapper) != 0) {
             LOGD("Failed to create uevent monitor thread\n");
         }
@@ -2638,7 +2671,7 @@ cleanup:
     config_watch_stop();
 
     /* Wait for uevent monitor thread */
-    if (g_uevent_fd >= 0) {
+    if (!g_headless_mode && g_uevent_fd >= 0) {
         pthread_join(g_uevent_thread, NULL);
         close(g_uevent_fd);
         g_uevent_fd = -1;
@@ -2649,7 +2682,9 @@ cleanup:
         StopTvProcessing(g_pTvClientWrapper);
     }
 
-    StopNoSignalUi();
+    if (!g_headless_mode) {
+        StopNoSignalUi();
+    }
 
     /* Cleanup config */
     config_cleanup();

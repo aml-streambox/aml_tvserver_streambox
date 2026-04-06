@@ -238,6 +238,11 @@ int TvService::ParserTvCommand(const char *commandData)
         } else if (moduleID == TV_CONTROL_SET_BOOST_ON) {
             temp = strtok(NULL, delimitation);
             ret = mpTv->SetEdidBoostOn(atoi(temp));
+        } else if (moduleID == TV_CONTROL_SET_HEADLESS_MODE) {
+            temp = strtok(NULL, delimitation);
+            int headless = atoi(temp);
+            LOGD("%s: SetHeadlessMode(%d)\n", __FUNCTION__, headless);
+            ret = mpTv->SetHeadlessMode(headless ? true : false);
         } else {
             LOGD("%s: invalid sourec cmd!\n", __FUNCTION__);
         }
