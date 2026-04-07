@@ -481,6 +481,52 @@ int CHDMIRxManager::PatchEdidFor120Hz(unsigned char *edidData, int edidSize)
     }
     edidData[extOffset + 127] = (256 - checksum) & 0xFF;
 
+    // ---- Step 1b: Add 2560x1440@60Hz DTD to base block ----
+    // The PS5 looks for 1440p support in the base block DTDs.
+    // Replace Monitor Name descriptor (slot 3, offset 90) with a 1440p DTD.
+    // Monitor Name is cosmetic and not needed for PS5 compatibility.
+    {
+        int baseSlot3 = 90;  // 18-byte descriptor slot 3
+
+        // 2560x1440@60Hz CVT-RBv2 timing
+        unsigned int pc = 24150;  // 241.50 MHz in 10kHz units
+        unsigned int hA = 2560, hB = 160, hF = 48, hS = 32;
+        unsigned int vA = 1440, vB = 41,  vF = 3,  vS = 5;
+        // Match stock DTD image sizes for consistency
+        unsigned int hImg = 800, vImg = 450;
+
+        edidData[baseSlot3 + 0] = pc & 0xFF;
+        edidData[baseSlot3 + 1] = (pc >> 8) & 0xFF;
+        edidData[baseSlot3 + 2] = hA & 0xFF;
+        edidData[baseSlot3 + 3] = hB & 0xFF;
+        edidData[baseSlot3 + 4] = (((hA >> 8) & 0xF) << 4) | ((hB >> 8) & 0xF);
+        edidData[baseSlot3 + 5] = vA & 0xFF;
+        edidData[baseSlot3 + 6] = vB & 0xFF;
+        edidData[baseSlot3 + 7] = (((vA >> 8) & 0xF) << 4) | ((vB >> 8) & 0xF);
+        edidData[baseSlot3 + 8] = hF & 0xFF;
+        edidData[baseSlot3 + 9] = hS & 0xFF;
+        edidData[baseSlot3 + 10] = ((vF & 0xF) << 4) | (vS & 0xF);
+        edidData[baseSlot3 + 11] = (((hF >> 8) & 0x3) << 6) |
+                                    (((hS >> 8) & 0x3) << 4) |
+                                    (((vF >> 4) & 0x3) << 2) |
+                                    ((vS >> 4) & 0x3);
+        edidData[baseSlot3 + 12] = hImg & 0xFF;
+        edidData[baseSlot3 + 13] = vImg & 0xFF;
+        edidData[baseSlot3 + 14] = (((hImg >> 8) & 0xF) << 4) | ((vImg >> 8) & 0xF);
+        edidData[baseSlot3 + 15] = 0x00; // h_border
+        edidData[baseSlot3 + 16] = 0x00; // v_border
+        edidData[baseSlot3 + 17] = 0x1E; // non-interlaced, digital separate, +H/+V
+
+        LOGD("%s: Replaced Monitor Name (base slot 3) with 2560x1440@60Hz DTD\n", __FUNCTION__);
+    }
+
+    // Recalculate base block checksum after slot 3 replacement
+    checksum = 0;
+    for (int i = 0; i < 127; i++) {
+        checksum += edidData[i];
+    }
+    edidData[127] = (256 - checksum) & 0xFF;
+
     // ---- Step 2: Create a second CEA extension block with DTDs ----
     // The second extension block goes at offset 256 (base=128, ext1=128, ext2=128)
     int ext2Offset = 256;
@@ -556,9 +602,10 @@ int CHDMIRxManager::PatchEdidFor120Hz(unsigned char *edidData, int edidSize)
                                     (((hS >> 8) & 0x3) << 4) |
                                     (((vF >> 4) & 0x3) << 2) |
                                     ((vS >> 4) & 0x3);
-        edidData[dtdOffset + 12] = 0x00; // h_image_size low
-        edidData[dtdOffset + 13] = 0x00; // v_image_size low
-        edidData[dtdOffset + 14] = 0x00; // image size high nibbles
+        // Image size matching stock DTDs (800mm x 450mm)
+        edidData[dtdOffset + 12] = 0x20; // h_image_size low (800 & 0xFF = 0x20)
+        edidData[dtdOffset + 13] = 0xC2; // v_image_size low (450 & 0xFF = 0xC2)
+        edidData[dtdOffset + 14] = 0x31; // high nibbles ((800>>8)<<4 | (450>>8) = 0x31)
         edidData[dtdOffset + 15] = 0x00; // h_border
         edidData[dtdOffset + 16] = 0x00; // v_border
         edidData[dtdOffset + 17] = newModes[m].flags;
