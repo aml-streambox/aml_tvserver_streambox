@@ -234,19 +234,17 @@ int CHDMIRxManager::SetHdmiPortCecPhysicAddr()
     return 0;
 }
 
-int CHDMIRxManager::UpdataEdidDataWithPort(int port, unsigned char *dataBuf)
+int CHDMIRxManager::UpdataEdidDataWithPort(int port, unsigned char *dataBuf, int dataSize, int edidType)
 {
     int ret = -1;
-    int size = REAL_EDID_DATA_SIZE + 1;
+    int size = dataSize + 1;
     unsigned char LoadBuf[size];
     memset(LoadBuf, 0, sizeof(char) * size);
-    LoadBuf[0] = (unsigned char)port;
-    memcpy(LoadBuf+1, dataBuf, REAL_EDID_DATA_SIZE);
-    /*LOGD("%s: edid data print start.\n", __FUNCTION__);
-    for (int i=0;i<257;i++) {
-        printf("0x%x ",LoadBuf[i]);
-    }
-    LOGD("%s: edid data print end.\n", __FUNCTION__);*/
+    // Header byte: low nibble = port (1-based), high nibble = edid_type
+    LoadBuf[0] = (unsigned char)((edidType << 4) | (port & 0x0F));
+    memcpy(LoadBuf+1, dataBuf, dataSize);
+    LOGD("%s: port=%d, dataSize=%d, edidType=%d, header=0x%02x\n",
+         __FUNCTION__, port, dataSize, edidType, LoadBuf[0]);
     int devFd = open(HDMI_EDID_DATA_DEV_PATH, O_RDWR);
     if (devFd < 0) {
         LOGE("%s: open ERROR(%s)!\n", __FUNCTION__, strerror(errno));
@@ -264,7 +262,8 @@ int CHDMIRxManager::UpdataEdidDataWithPort(int port, unsigned char *dataBuf)
     }
     if (ret >= 0) {
         LOGD("%s: would update edid.\n", __FUNCTION__);
-        HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE);
+        unsigned char portIdx = (unsigned char)port;
+        HDMIRxDeviceIOCtl(HDMI_IOC_EDID_UPDATE_WITH_PORT, &portIdx);
     }
 
     return ret;
@@ -385,291 +384,213 @@ int CHDMIRxManager::GetVrrEnabled()
 #ifdef STREAM_BOX
 int CHDMIRxManager::PatchEdidFor120Hz(unsigned char *edidData, int edidSize)
 {
-    if (edidData == NULL || edidSize < 256) {
-        LOGE("%s: Invalid EDID data or size\n", __FUNCTION__);
+    if (edidData == NULL || edidSize < PATCHED_EDID_MAX_SIZE) {
+        LOGE("%s: Invalid EDID data or buffer size (need %d, got %d)\n",
+             __FUNCTION__, PATCHED_EDID_MAX_SIZE, edidSize);
         return -1;
     }
 
-    LOGD("%s: Patching EDID to enable 120Hz support\n", __FUNCTION__);
+    LOGD("%s: Patching EDID for high-refresh and non-standard modes\n", __FUNCTION__);
 
-    // EDID structure:
-    // Base block: bytes 0-127
-    // Extension blocks: bytes 128+
-    // CEA extension block starts at byte 128, tag 0x02
-    
-    // Check if we have extension blocks
+    // Verify base block has at least 1 extension
     int numExtensions = edidData[0x7E];
     if (numExtensions == 0) {
-        LOGD("%s: No extension blocks found, creating CEA extension\n", __FUNCTION__);
-        // Create a basic CEA extension block if none exists
-        if (edidSize >= 256) {
-            edidData[0x7E] = 1; // Set number of extensions to 1
-            // Initialize CEA extension block at offset 128
-            edidData[128] = 0x02; // CEA extension tag
-            edidData[129] = 0x03; // CEA revision 3
-            edidData[130] = 4;    // DTD start offset (after basic header)
-            edidData[131] = 0xE0; // Flags: digital, supports YCbCr 4:4:4, YCbCr 4:2:2
-            numExtensions = 1;
+        LOGE("%s: No extension blocks found\n", __FUNCTION__);
+        return -1;
+    }
+
+    // Find CEA extension block (tag 0x02)
+    int extOffset = -1;
+    for (int ext = 0; ext < numExtensions; ext++) {
+        int testOffset = 128 + ext * 128;
+        if (testOffset + 128 > REAL_EDID_DATA_SIZE) break;
+        if (edidData[testOffset] == 0x02) {
+            extOffset = testOffset;
+            break;
+        }
+    }
+    if (extOffset < 0) {
+        LOGE("%s: No CEA extension block found\n", __FUNCTION__);
+        return -1;
+    }
+
+    LOGD("%s: CEA extension at offset %d\n", __FUNCTION__, extOffset);
+
+    // Parse the CEA extension to find the video data block
+    int dtdStart = edidData[extOffset + 2];
+    if (dtdStart < 4) dtdStart = 4;
+    int dataBlockOffset = extOffset + 4;
+    int dataBlockEnd = extOffset + dtdStart;
+
+    int videoBlockOffset = -1;
+    int videoBlockLength = 0;
+    bool vic63Present = false;
+
+    int offset = dataBlockOffset;
+    while (offset < dataBlockEnd && offset < extOffset + 127) {
+        unsigned char tag = (edidData[offset] >> 5) & 0x07;
+        unsigned char length = edidData[offset] & 0x1F;
+        if (length == 0 || offset + length + 1 > extOffset + 127) break;
+
+        if (tag == 0x02) { // Video data block
+            videoBlockOffset = offset;
+            videoBlockLength = length;
+            for (int i = 1; i <= length; i++) {
+                if ((edidData[offset + i] & 0x7F) == 63) {
+                    vic63Present = true;
+                    break;
+                }
+            }
+            break;
+        }
+        offset += length + 1;
+    }
+
+    // ---- Step 1: Add VIC 63 (1080p120) to the existing video data block ----
+    // We do this by shifting all subsequent data blocks right by 1 byte
+    if (!vic63Present && videoBlockOffset >= 0 && videoBlockLength < 31) {
+        int insertPos = videoBlockOffset + videoBlockLength + 1;
+        int shiftEnd = extOffset + 127; // byte before checksum
+        int shiftBytes = shiftEnd - insertPos;
+
+        if (shiftBytes > 0 && dtdStart + 1 <= 127) {
+            // Shift everything after the video block right by 1 byte
+            memmove(edidData + insertPos + 1, edidData + insertPos, shiftBytes);
+            // Insert VIC 63
+            edidData[insertPos] = 63;
+            // Update video block length
+            videoBlockLength++;
+            edidData[videoBlockOffset] = (edidData[videoBlockOffset] & 0xE0) | (videoBlockLength & 0x1F);
+            // Update DTD start offset
+            dtdStart++;
+            edidData[extOffset + 2] = dtdStart;
+            LOGD("%s: Added VIC 63 (1080p120) to video block, new length=%d, dtdStart=%d\n",
+                 __FUNCTION__, videoBlockLength, dtdStart);
         } else {
-            LOGE("%s: EDID size too small to add extension\n", __FUNCTION__);
-            return -1;
+            LOGD("%s: Cannot add VIC 63 - no room to shift (dtdStart=%d)\n",
+                 __FUNCTION__, dtdStart);
         }
+    } else if (vic63Present) {
+        LOGD("%s: VIC 63 already present\n", __FUNCTION__);
     }
 
-    // Find or use CEA extension block (tag 0x02)
-    int extOffset = 128;
-    if (edidData[extOffset] != 0x02) {
-        // First extension is not CEA, try to find one or create it
-        for (int ext = 0; ext < numExtensions && (128 + ext * 128) < edidSize; ext++) {
-            int testOffset = 128 + ext * 128;
-            if (edidData[testOffset] == 0x02) {
-                extOffset = testOffset;
-                break;
-            }
+    // Recalculate checksum for the first extension block
+    unsigned char checksum = 0;
+    for (int i = extOffset; i < extOffset + 127; i++) {
+        checksum += edidData[i];
+    }
+    edidData[extOffset + 127] = (256 - checksum) & 0xFF;
+
+    // ---- Step 2: Create a second CEA extension block with DTDs ----
+    // The second extension block goes at offset 256 (base=128, ext1=128, ext2=128)
+    int ext2Offset = 256;
+
+    // Initialize the second CEA extension block
+    memset(edidData + ext2Offset, 0, 128);
+    edidData[ext2Offset + 0] = 0x02; // CEA extension tag
+    edidData[ext2Offset + 1] = 0x03; // CEA revision 3
+    // Byte 2 = DTD start offset (relative to ext block start)
+    // No data blocks in this extension, DTDs start at offset 4
+    edidData[ext2Offset + 2] = 4;
+    edidData[ext2Offset + 3] = 0x00; // No native DTDs, no additional capabilities
+
+    // DTD mode table for non-standard modes
+    // pixel_clock in 10kHz units, timing parameters per EDID spec
+    struct {
+        unsigned int pixelClock;
+        unsigned int hActive, hBlank, hFrontPorch, hSync;
+        unsigned int vActive, vBlank, vFrontPorch, vSync;
+        unsigned char flags; // byte 17: signal features
+        const char *desc;
+    } newModes[] = {
+        // 2560x1440@120Hz CVT-RBv2
+        { 48300, 2560, 160, 48, 32, 1440, 41, 3, 5, 0x1E, "2560x1440p120" },
+        // 2560x1440@60Hz CVT-RBv2
+        { 24150, 2560, 160, 48, 32, 1440, 41, 3, 5, 0x1E, "2560x1440p60" },
+        // 1920x1080@144Hz CVT-RBv2
+        { 35640, 1920, 280, 88, 44, 1080, 45, 4, 5, 0x1E, "1920x1080p144" },
+        // 1920x1080@240Hz CVT-RBv2
+        { 59400, 1920, 280, 88, 44, 1080, 45, 4, 5, 0x1E, "1920x1080p240" },
+        // 3440x1440@60Hz CVT-RBv2
+        { 31975, 3440, 160, 48, 32, 1440, 49, 3, 5, 0x1E, "3440x1440p60" },
+        // 2560x1440@144Hz CVT-RBv2
+        { 57104, 2560, 160, 48, 32, 1440, 18, 3, 5, 0x1E, "2560x1440p144" },
+    };
+    int numModes = sizeof(newModes) / sizeof(newModes[0]);
+
+    int dtd2Start = 4; // DTDs start at offset 4 in the second extension
+    int dtd2End = 127; // byte before checksum
+    int dtdOffset = ext2Offset + dtd2Start;
+    int addedCount = 0;
+
+    for (int m = 0; m < numModes; m++) {
+        if (dtdOffset + 18 > ext2Offset + dtd2End) {
+            LOGD("%s: No more DTD space for %s in ext block 2\n",
+                 __FUNCTION__, newModes[m].desc);
+            break;
         }
-        // If still not found and we have space, create one
-        if (edidData[extOffset] != 0x02 && numExtensions < 4 && edidSize >= (128 + (numExtensions + 1) * 128)) {
-            extOffset = 128 + numExtensions * 128;
-            edidData[extOffset] = 0x02;
-            edidData[extOffset + 1] = 0x03;
-            edidData[extOffset + 2] = 4;
-            edidData[extOffset + 3] = 0xE0;
-            edidData[0x7E] = numExtensions + 1;
-        }
+
+        // Encode DTD per EDID spec
+        unsigned int pc = newModes[m].pixelClock;
+        unsigned int hA = newModes[m].hActive;
+        unsigned int hB = newModes[m].hBlank;
+        unsigned int hF = newModes[m].hFrontPorch;
+        unsigned int hS = newModes[m].hSync;
+        unsigned int vA = newModes[m].vActive;
+        unsigned int vB = newModes[m].vBlank;
+        unsigned int vF = newModes[m].vFrontPorch;
+        unsigned int vS = newModes[m].vSync;
+
+        edidData[dtdOffset + 0] = pc & 0xFF;
+        edidData[dtdOffset + 1] = (pc >> 8) & 0xFF;
+        edidData[dtdOffset + 2] = hA & 0xFF;
+        edidData[dtdOffset + 3] = hB & 0xFF;
+        edidData[dtdOffset + 4] = (((hA >> 8) & 0xF) << 4) | ((hB >> 8) & 0xF);
+        edidData[dtdOffset + 5] = vA & 0xFF;
+        edidData[dtdOffset + 6] = vB & 0xFF;
+        edidData[dtdOffset + 7] = (((vA >> 8) & 0xF) << 4) | ((vB >> 8) & 0xF);
+        edidData[dtdOffset + 8] = hF & 0xFF;
+        edidData[dtdOffset + 9] = hS & 0xFF;
+        edidData[dtdOffset + 10] = ((vF & 0xF) << 4) | (vS & 0xF);
+        edidData[dtdOffset + 11] = (((hF >> 8) & 0x3) << 6) |
+                                    (((hS >> 8) & 0x3) << 4) |
+                                    (((vF >> 4) & 0x3) << 2) |
+                                    ((vS >> 4) & 0x3);
+        edidData[dtdOffset + 12] = 0x00; // h_image_size low
+        edidData[dtdOffset + 13] = 0x00; // v_image_size low
+        edidData[dtdOffset + 14] = 0x00; // image size high nibbles
+        edidData[dtdOffset + 15] = 0x00; // h_border
+        edidData[dtdOffset + 16] = 0x00; // v_border
+        edidData[dtdOffset + 17] = newModes[m].flags;
+
+        addedCount++;
+        LOGD("%s: Added %s DTD at offset %d (pixel_clock=%u)\n",
+             __FUNCTION__, newModes[m].desc, dtdOffset, pc);
+        dtdOffset += 18;
     }
 
-    if (edidData[extOffset] == 0x02) {
-        LOGD("%s: Found/created CEA extension block at offset %d\n", __FUNCTION__, extOffset);
-        
-        // CEA extension structure:
-        // Byte 0: Extension tag (0x02)
-        // Byte 1: Revision number
-        // Byte 2: DTD start offset
-        // Byte 3: Flags (bit 7 = native DTD support)
-        
-        // Enable native detailed timing support (bit 7)
-        edidData[extOffset + 3] |= 0x80;
-        
-        // Get DTD start offset
-        int dtdStart = edidData[extOffset + 2];
-        if (dtdStart < 4) dtdStart = 4; // Minimum DTD start
-        
-        // Data block collection starts at offset 4 in CEA extension
-        int dataBlockOffset = extOffset + 4;
-        int dataBlockEnd = extOffset + dtdStart;
-        
-        // Parse existing data blocks to find video data block
-        int offset = dataBlockOffset;
-        int videoBlockOffset = -1;
-        int videoBlockLength = 0;
-        bool vic63Present = false;
-        
-        while (offset < dataBlockEnd && offset < extOffset + 127) {
-            if (offset + 1 > extOffset + 127) break;
-            
-            unsigned char tag = (edidData[offset] >> 5) & 0x07;
-            unsigned char length = edidData[offset] & 0x1F;
-            
-            if (length == 0 || offset + length + 1 > extOffset + 127) {
-                break;
-            }
-            
-            // Check for video data block (tag 0x02 = VIDEO_TAG)
-            if (tag == 0x02) {
-                videoBlockOffset = offset;
-                videoBlockLength = length;
-                
-                // Check if VIC 63 (1080p@120Hz) is already present
-                for (int i = 1; i <= length && (offset + i) < extOffset + 127; i++) {
-                    if (edidData[offset + i] == 63) {
-                        vic63Present = true;
-                        LOGD("%s: VIC 63 (1080p@120Hz) already present in EDID\n", __FUNCTION__);
-                        break;
-                    }
-                }
-                break; // Found video block, no need to continue
-            }
-            
-            offset += length + 1;
-        }
-        
-        // Add VIC 63 (1080p@120Hz) if not present
-        if (!vic63Present) {
-            if (videoBlockOffset >= 0) {
-                // Video block exists, try to add VIC 63 to it
-                int newLength = videoBlockLength + 1;
-                if (videoBlockOffset + newLength + 1 <= dataBlockEnd && 
-                    videoBlockOffset + newLength + 1 <= extOffset + 127) {
-                    // Update length byte
-                    edidData[videoBlockOffset] = (edidData[videoBlockOffset] & 0xE0) | (newLength & 0x1F);
-                    // Add VIC 63
-                    edidData[videoBlockOffset + videoBlockLength + 1] = 63;
-                    LOGD("%s: Added VIC 63 (1080p@120Hz) to existing video data block at offset %d\n", 
-                         __FUNCTION__, videoBlockOffset);
-                } else {
-                    LOGD("%s: Video block full (length=%d, end=%d), cannot add VIC 63\n", 
-                         __FUNCTION__, videoBlockLength, dataBlockEnd);
-                }
-            } else {
-                // No video block exists, create one
-                // Check if we have space for a new video data block (tag + length + 1 VIC = 3 bytes)
-                if (offset + 3 <= dataBlockEnd && offset + 3 <= extOffset + 127) {
-                    // Create video data block: tag 0x02, length 1, VIC 63
-                    edidData[offset] = (0x02 << 5) | 0x01; // Tag 0x02, length 1
-                    edidData[offset + 1] = 63; // VIC 63 = 1080p@120Hz
-                    LOGD("%s: Created new video data block with VIC 63 (1080p@120Hz) at offset %d\n", 
-                         __FUNCTION__, offset);
-                    
-                    // Update DTD start if we added a block
-                    if (offset + 3 > dtdStart) {
-                        edidData[extOffset + 2] = offset + 3;
-                        dtdStart = offset + 3;
-                    }
-                } else {
-                    LOGD("%s: No space to add video data block for VIC 63 (offset=%d, end=%d)\n", 
-                         __FUNCTION__, offset, dataBlockEnd);
-                }
-            }
-        }
-        
-        // Add Detailed Timing Descriptors (DTDs) for new modes
-        // DTD is 18 bytes each, we need space after current DTD start
-        int dtdEnd = extOffset + 127; // Last byte before checksum
-        int dtdSpace = dtdEnd - dtdStart;
-        
-        // Mode table: pixel_clock (10kHz), hActive, hBlank, hFront, hSync, 
-        //             vActive, vBlank, vFront, vSync, flags, description
-        struct {
-            unsigned int pixelClock;
-            unsigned int hActive, hBlank, hFrontPorch, hSync;
-            unsigned int vActive, vBlank, vFrontPorch, vSync;
-            unsigned char flags;
-            const char *desc;
-        } newModes[] = {
-            // 2560x1440@120Hz (already existed, kept for compat)
-            { 48300, 2560, 160, 48, 32, 1440, 41, 3, 5, 0x1E, "2560x1440p120" },
-            // 2560x1440@60Hz
-            { 24150, 2560, 160, 48, 32, 1440, 41, 3, 5, 0x1E, "2560x1440p60" },
-            // 2560x1440@144Hz (reduced blanking)
-            { 57104, 2560, 160, 48, 32, 1440, 18, 3, 5, 0x1E, "2560x1440p144" },
-            // 1080p@144Hz
-            { 35640, 1920, 280, 88, 44, 1080, 45, 4, 5, 0x1E, "1920x1080p144" },
-            // 1080p@240Hz
-            { 59400, 1920, 280, 88, 44, 1080, 45, 4, 5, 0x1E, "1920x1080p240" },
-            // 3440x1440@60Hz (reduced blanking)
-            { 31975, 3440, 160, 48, 32, 1440, 49, 3, 5, 0x1E, "3440x1440p60" },
-        };
-        int numModes = sizeof(newModes) / sizeof(newModes[0]);
-        int addedCount = 0;
-        
-        for (int m = 0; m < numModes; m++) {
-            if (dtdSpace < 18) {
-                LOGD("%s: No more DTD space for %s\n", __FUNCTION__, newModes[m].desc);
-                break;
-            }
-            
-            // Check if this DTD already exists by matching pixel clock + resolution
-            bool alreadyPresent = false;
-            for (int dtdOffset = dtdStart; dtdOffset + 18 <= dtdEnd; dtdOffset += 18) {
-                unsigned int pc = edidData[dtdOffset] | (edidData[dtdOffset + 1] << 8);
-                unsigned int hA = ((edidData[dtdOffset + 4] >> 4) & 0xF) << 8 | edidData[dtdOffset + 2];
-                unsigned int vA = ((edidData[dtdOffset + 7] >> 4) & 0xF) << 8 | edidData[dtdOffset + 5];
-                
-                // Match resolution and pixel clock within ±1%
-                if (hA == newModes[m].hActive && vA == newModes[m].vActive &&
-                    pc > 0 && abs((int)pc - (int)newModes[m].pixelClock) < (int)(newModes[m].pixelClock / 100 + 1)) {
-                    alreadyPresent = true;
-                    LOGD("%s: %s DTD already present\n", __FUNCTION__, newModes[m].desc);
-                    break;
-                }
-                // Stop at empty DTD slot (pixel clock 0)
-                if (pc == 0) break;
-            }
-            
-            if (alreadyPresent) continue;
-            
-            // Find first available DTD slot
-            int dtdOffset = dtdStart;
-            bool foundSlot = false;
-            
-            for (; dtdOffset + 18 <= dtdEnd; dtdOffset += 18) {
-                bool isEmpty = true;
-                for (int i = 0; i < 2; i++) {
-                    if (edidData[dtdOffset + i] != 0) {
-                        isEmpty = false;
-                        break;
-                    }
-                }
-                if (isEmpty) {
-                    foundSlot = true;
-                    break;
-                }
-            }
-            
-            if (!foundSlot && dtdOffset + 18 <= dtdEnd) {
-                foundSlot = true;
-            }
-            
-            if (!foundSlot) {
-                LOGD("%s: No slot for %s DTD (dtdStart=%d, dtdEnd=%d)\n",
-                     __FUNCTION__, newModes[m].desc, dtdStart, dtdEnd);
-                continue;
-            }
-            
-            // Encode DTD per EDID spec
-            unsigned int pc = newModes[m].pixelClock;
-            unsigned int hA = newModes[m].hActive;
-            unsigned int hB = newModes[m].hBlank;
-            unsigned int hF = newModes[m].hFrontPorch;
-            unsigned int hS = newModes[m].hSync;
-            unsigned int vA = newModes[m].vActive;
-            unsigned int vB = newModes[m].vBlank;
-            unsigned int vF = newModes[m].vFrontPorch;
-            unsigned int vS = newModes[m].vSync;
-            
-            edidData[dtdOffset + 0] = pc & 0xFF;
-            edidData[dtdOffset + 1] = (pc >> 8) & 0xFF;
-            edidData[dtdOffset + 2] = hA & 0xFF;
-            edidData[dtdOffset + 3] = hB & 0xFF;
-            edidData[dtdOffset + 4] = (((hA >> 8) & 0xF) << 4) | ((hB >> 8) & 0xF);
-            edidData[dtdOffset + 5] = vA & 0xFF;
-            edidData[dtdOffset + 6] = vB & 0xFF;
-            edidData[dtdOffset + 7] = (((vA >> 8) & 0xF) << 4) | ((vB >> 8) & 0xF);
-            edidData[dtdOffset + 8] = hF & 0xFF;
-            edidData[dtdOffset + 9] = hS & 0xFF;
-            edidData[dtdOffset + 10] = ((vF & 0xF) << 4) | (vS & 0xF);
-            edidData[dtdOffset + 11] = (((hF >> 8) & 0x3) << 6) |
-                                        (((hS >> 8) & 0x3) << 4) |
-                                        (((vF >> 4) & 0x3) << 2) |
-                                        ((vS >> 4) & 0x3);
-            edidData[dtdOffset + 12] = 0x00; // h_image_size
-            edidData[dtdOffset + 13] = 0x00; // v_image_size
-            edidData[dtdOffset + 14] = 0x00;
-            edidData[dtdOffset + 15] = 0x00; // h_border
-            edidData[dtdOffset + 16] = 0x00; // v_border
-            edidData[dtdOffset + 17] = newModes[m].flags;
-            
-            addedCount++;
-            LOGD("%s: Added %s DTD at offset %d (pixel_clock=%u)\n",
-                 __FUNCTION__, newModes[m].desc, dtdOffset, pc);
-        }
-        
-        LOGD("%s: EDID patched: VIC63=%s, added %d DTDs, DTD start at %d\n", 
-             __FUNCTION__, vic63Present ? "present" : "added", 
-             addedCount, edidData[extOffset + 2]);
-        
-        // Recalculate checksum for the extension block
-        unsigned char checksum = 0;
-        for (int i = extOffset; i < extOffset + 127; i++) {
-            checksum += edidData[i];
-        }
-        edidData[extOffset + 127] = 256 - checksum;
-        
-        return 0;
-    }
+    // Update base block extension count
+    edidData[0x7E] = 2; // base + ext1 + ext2
 
-    LOGE("%s: Could not find or create CEA extension block\n", __FUNCTION__);
-    return -1;
+    // Recalculate base block checksum
+    checksum = 0;
+    for (int i = 0; i < 127; i++) {
+        checksum += edidData[i];
+    }
+    edidData[127] = (256 - checksum) & 0xFF;
+
+    // Recalculate second extension block checksum
+    checksum = 0;
+    for (int i = ext2Offset; i < ext2Offset + 127; i++) {
+        checksum += edidData[i];
+    }
+    edidData[ext2Offset + 127] = (256 - checksum) & 0xFF;
+
+    LOGD("%s: EDID patched: VIC63=%s, %d DTDs added in ext block 2, total size=%d bytes\n",
+         __FUNCTION__, vic63Present ? "already present" : "added",
+         addedCount, PATCHED_EDID_MAX_SIZE);
+
+    return addedCount > 0 ? 0 : -1;
 }
 
 int CHDMIRxManager::ReadEdidFromHdmiTx(unsigned char *edidData, int maxSize)

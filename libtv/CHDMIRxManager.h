@@ -29,6 +29,15 @@
 #endif
 
 #define REAL_EDID_DATA_SIZE        (256)
+#ifdef STREAM_BOX
+// Patched EDID can have up to 3 blocks (base + 2 CEA extensions = 384 bytes)
+// to accommodate DTDs for non-standard modes (1440p, ultrawide, high-refresh)
+#define PATCHED_EDID_MAX_SIZE      (384)
+// Kernel edid_with_port types (high nibble of header byte)
+#define EDID_TYPE_256_PLUS_256     (0)
+#define EDID_TYPE_512_PLUS_512     (1)
+#define EDID_TYPE_256_PLUS_512     (2)
+#endif
 
 #define  HDMI_UBOOT_EDID_VERSION          "hdmi.edid.version"
 #define  HDMI_UBOOT_EDID_FEATURE          "hdmi.edid.feature"
@@ -64,7 +73,7 @@ public:
     int GetHdmiHdcpKeyKsvInfo(struct _hdcp_ksv *msg);
     int CalHdmiPortCecPhysicAddr(void);
     int SetHdmiPortCecPhysicAddr(void);
-    int UpdataEdidDataWithPort(int port, unsigned char *dataBuf);
+    int UpdataEdidDataWithPort(int port, unsigned char *dataBuf, int dataSize = REAL_EDID_DATA_SIZE, int edidType = 0);
     int HdmiEnableSPDFifo(bool enable);
     int HdmiRxGetSPDInfoframe(struct spd_infoframe_st* spd);
     void SetHDMIFeatureInit(int allmEnable, int VrrEnable);

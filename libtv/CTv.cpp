@@ -632,10 +632,8 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
         mpTvin->Tvin_StopDecoder();
     }
 
-    char edidLoadBuf[(TVIN_PORT_ID_MAX - 1) * 2 * REAL_EDID_DATA_SIZE];
     char edidFileName[100] = {0};
     int loadNum = 1;
-    int i = 0;
     tvin_port_t tvin_port = TVIN_PORT_NULL;
     ui_hdmi_port_id_t ui_port = UI_HDMI_PORT_ID_MAX;
     tv_source_input_t source_input;
@@ -646,55 +644,99 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
             CFG_HDMI_EDID_FILE_PATH,
             "/vendor/etc/tvconfig/hdmi");
 #endif
-    LOGD("%s: sizeof edidLoadBuf:[%d] isDolbyVisionEnable = %d.\n",
-            __FUNCTION__,
-            sizeof(edidLoadBuf),
-            isDolbyVisionEnable);
+    LOGD("%s: isDolbyVisionEnable = %d.\n", __FUNCTION__, isDolbyVisionEnable);
+
+#ifdef STREAM_BOX
+    // StreamBox: Use per-port delivery with EDID_TYPE_256_PLUS_512 to support
+    // enlarged 2.0 EDIDs (384 bytes = base + 2 CEA extensions) with DTDs for
+    // non-standard modes (1440p, ultrawide, high-refresh).
+    int ret = 0;
+    for (loadNum = (int)TVIN_PORT_ID_1; loadNum < (int)TVIN_PORT_ID_MAX; loadNum++) {
+        tvin_port = mpTvin->Tvin_GetVdinPortByVdinPortID((tvin_port_id_t)loadNum);
+        source_input = mpTvin->Tvin_PortToSourceInput(tvin_port);
+        ui_port = mpTvin->Tvin_GetUIHdmiPortIdBySourceInput(source_input);
+        LOGD("%s:tvin port ID:%d tvin_port:0x%x source_input:%d ui_port:%d\n",
+                __FUNCTION__, loadNum, tvin_port, source_input, ui_port);
+
+        // Load EDID 1.4 (256 bytes, no patching needed)
+        unsigned char edid14[REAL_EDID_DATA_SIZE];
+        memset(edid14, 0, sizeof(edid14));
+        sprintf(edidFileName, "%s/port%d_14%s.bin",
+                edidFilePath, ui_port,
+                isDolbyVisionEnable ? "_dv" : "");
+        if (!isFileExist(edidFileName))
+            sprintf(edidFileName, "%s/port%d_14%s.bin",
+                    edidFilePath, UI_HDMI_PORT_ID_1,
+                    isDolbyVisionEnable ? "_dv" : "");
+        ReadDataFromFile(edidFileName, 0, REAL_EDID_DATA_SIZE, (char *)edid14);
+        LOGD("%s:File:%s\n", __FUNCTION__, edidFileName);
+        // Patch monitor name on 1.4 EDID too
+        mpHDMIRxManager->PatchEdidMonitorName(edid14, REAL_EDID_DATA_SIZE);
+
+        // Load EDID 2.0 into a larger buffer for patching
+        unsigned char edid20[PATCHED_EDID_MAX_SIZE];
+        memset(edid20, 0, sizeof(edid20));
+        sprintf(edidFileName, "%s/port%d_20%s.bin",
+                edidFilePath, ui_port,
+                isDolbyVisionEnable ? "_dv" : "");
+        if (!isFileExist(edidFileName))
+            sprintf(edidFileName, "%s/port%d_20%s.bin",
+                    edidFilePath, UI_HDMI_PORT_ID_1,
+                    isDolbyVisionEnable ? "_dv" : "");
+        ReadDataFromFile(edidFileName, 0, REAL_EDID_DATA_SIZE, (char *)edid20);
+        LOGD("%s:File:%s\n", __FUNCTION__, edidFileName);
+
+        // Patch EDID 2.0: add VIC 63 + create second CEA ext block with DTDs
+        mpHDMIRxManager->PatchEdidFor120Hz(edid20, PATCHED_EDID_MAX_SIZE);
+        // Patch monitor name
+        mpHDMIRxManager->PatchEdidMonitorName(edid20, PATCHED_EDID_MAX_SIZE);
+
+        // Build the combined buffer for EDID_TYPE_256_PLUS_512:
+        // kernel expects: [1.4 EDID (256 bytes)] [2.0 EDID (variable, up to 512 bytes)]
+        int combinedSize = REAL_EDID_DATA_SIZE + PATCHED_EDID_MAX_SIZE;
+        unsigned char combinedBuf[combinedSize];
+        memcpy(combinedBuf, edid14, REAL_EDID_DATA_SIZE);
+        memcpy(combinedBuf + REAL_EDID_DATA_SIZE, edid20, PATCHED_EDID_MAX_SIZE);
+
+        // Deliver per-port with EDID_TYPE_256_PLUS_512
+        int portRet = mpHDMIRxManager->UpdataEdidDataWithPort(
+            ui_port, combinedBuf, combinedSize, EDID_TYPE_256_PLUS_512);
+        if (portRet < 0) {
+            LOGE("%s: Failed to update EDID for port %d\n", __FUNCTION__, ui_port);
+            ret = portRet;
+        }
+    }
+#else
+    // Stock path: all-port delivery with 256-byte EDIDs
+    char edidLoadBuf[(TVIN_PORT_ID_MAX - 1) * 2 * REAL_EDID_DATA_SIZE];
+    int i = 0;
+    LOGD("%s: sizeof edidLoadBuf:[%d]\n", __FUNCTION__, sizeof(edidLoadBuf));
     memset(edidLoadBuf, 0, sizeof(edidLoadBuf));
     for (loadNum = (int)TVIN_PORT_ID_1; loadNum < (int)TVIN_PORT_ID_MAX; loadNum++) {
         tvin_port = mpTvin->Tvin_GetVdinPortByVdinPortID((tvin_port_id_t)loadNum);
         source_input = mpTvin->Tvin_PortToSourceInput(tvin_port);
         ui_port = mpTvin->Tvin_GetUIHdmiPortIdBySourceInput(source_input);
         LOGD("%s:tvin port ID:%d tvin_port:0x%x source_input:%d ui_port:%d\n",
-                __FUNCTION__,
-                loadNum,
-                tvin_port,
-                source_input,
-                ui_port);
+                __FUNCTION__, loadNum, tvin_port, source_input, ui_port);
 
         // Load EDID 1.4 then load EDID 2.0.
         for (i = 0; i < 2; i++) {
-            /* sprintf will add a null-terminated character ('\0') at the end of
-               the formatted string. So, do not need to memset the buffer.*/
             sprintf(edidFileName, "%s/port%d_%s%s.bin",
-                    edidFilePath,
-                    ui_port,
+                    edidFilePath, ui_port,
                     i ? "20" : "14",
                     isDolbyVisionEnable ? "_dv" : "");
             if (!isFileExist(edidFileName))
                 sprintf(edidFileName, "%s/port%d_%s%s.bin",
-                        edidFilePath,
-                        UI_HDMI_PORT_ID_1,
+                        edidFilePath, UI_HDMI_PORT_ID_1,
                         i ? "20" : "14",
                         isDolbyVisionEnable ? "_dv" : "");
-            ReadDataFromFile(edidFileName,
-                    0,
-                    REAL_EDID_DATA_SIZE,
+            ReadDataFromFile(edidFileName, 0, REAL_EDID_DATA_SIZE,
                     edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE);
             LOGD("%s:File:%s\n", __FUNCTION__, edidFileName);
-#ifdef STREAM_BOX
-            // Patch EDID to enable 120Hz support
-            mpHDMIRxManager->PatchEdidFor120Hz(
-                (unsigned char *)(edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE),
-                REAL_EDID_DATA_SIZE);
-            // Patch monitor name from HDMI TX connected display's EDID
-            mpHDMIRxManager->PatchEdidMonitorName(
-                (unsigned char *)(edidLoadBuf + (2 * loadNum - 2 + i) * REAL_EDID_DATA_SIZE),
-                REAL_EDID_DATA_SIZE);
-#endif
         }
     }
     int ret = mpHDMIRxManager->HdmiRxEdidDataSwitch(2 * K_PORT_NUM, edidLoadBuf);
+#endif
     if (ret == 0) {
         ui_hdmi_port_id_t portId = UI_HDMI_PORT_ID_MAX;
         int edidSetValue = 0;

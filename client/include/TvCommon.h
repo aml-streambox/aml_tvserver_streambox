@@ -96,5 +96,8 @@ typedef enum tvin_cn_type_e tvin_cn_type_t;
 
 // REAL_EDID_DATA_SIZE defined in libtv/CHDMIRxManager.h
 #define REAL_EDID_DATA_SIZE        (256)
+#ifdef STREAM_BOX
+#define PATCHED_EDID_MAX_SIZE      (384)
+#endif
 
 #endif
