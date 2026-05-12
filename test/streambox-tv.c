@@ -291,6 +291,7 @@ static void SyncDrmCrtcMode(const char *mode_str)
     char sname[64] = {0};
     char crtc_mode_before[64] = {0};
     char crtc_mode_after[64] = {0};
+    char write_buf[80];
     FILE *fp;
     char line[128];
     int fd;
@@ -347,7 +348,9 @@ static void SyncDrmCrtcMode(const char *mode_str)
                      __FUNCTION__, DRM_CRTC0_MODE_PATH, strerror(errno));
                 continue;
             }
-            if (write(fd, candidates[c], strlen(candidates[c])) < 0) {
+
+            snprintf(write_buf, sizeof(write_buf), "%s\n", candidates[c]);
+            if (write(fd, write_buf, strlen(write_buf)) < 0) {
                 LOGE("%s: write failed: %s\n", __FUNCTION__, strerror(errno));
             }
             close(fd);
@@ -369,6 +372,24 @@ static void SyncDrmCrtcMode(const char *mode_str)
 
     LOGE("%s: WARNING: failed to update DRM CRTC mode after %d attempts (still '%s')\n",
          __FUNCTION__, 3, crtc_mode_after);
+}
+
+static void SyncVideoAxisToHdmitx(void)
+{
+    int width = 0;
+    int height = 0;
+    char axis[64];
+
+    if (GetCurrentHdmiTxResolution(&width, &height) != 0 || width <= 0 || height <= 0) {
+        LOGE("%s: unable to read current TX resolution, skipping video axis sync\n", __FUNCTION__);
+        return;
+    }
+
+    snprintf(axis, sizeof(axis), "0 0 %d %d", width - 1, height - 1);
+    LOGD("%s: setting video axis to %s\n", __FUNCTION__, axis);
+    if (WriteSysfs("/sys/class/video/axis", axis) != 0) {
+        LOGE("%s: failed to set video axis to %s\n", __FUNCTION__, axis);
+    }
 }
 
 static void ResetFb0AfterTxModeChange(void)
@@ -2539,6 +2560,7 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
      * mode won't be found and the modeset will silently fail.
      */
     SyncDrmCrtcMode(mode_str);
+    SyncVideoAxisToHdmitx();
 
     LOGD("%s: HDMI TX stable, restarting audio passthrough\n", __FUNCTION__);
     StartAudioPassthrough();

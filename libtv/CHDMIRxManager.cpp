@@ -220,6 +220,38 @@ static void RecalculateEdidBlockChecksum(unsigned char *block)
     block[127] = (unsigned char)((256 - checksum) & 0xFF);
 }
 
+static void WriteDetailedTiming(unsigned char *dtd,
+                                unsigned int pixelClock,
+                                unsigned int hActive, unsigned int hBlank,
+                                unsigned int hFrontPorch, unsigned int hSync,
+                                unsigned int vActive, unsigned int vBlank,
+                                unsigned int vFrontPorch, unsigned int vSync,
+                                unsigned int hImageSize, unsigned int vImageSize,
+                                unsigned char flags)
+{
+    dtd[0] = pixelClock & 0xFF;
+    dtd[1] = (pixelClock >> 8) & 0xFF;
+    dtd[2] = hActive & 0xFF;
+    dtd[3] = hBlank & 0xFF;
+    dtd[4] = (((hActive >> 8) & 0xF) << 4) | ((hBlank >> 8) & 0xF);
+    dtd[5] = vActive & 0xFF;
+    dtd[6] = vBlank & 0xFF;
+    dtd[7] = (((vActive >> 8) & 0xF) << 4) | ((vBlank >> 8) & 0xF);
+    dtd[8] = hFrontPorch & 0xFF;
+    dtd[9] = hSync & 0xFF;
+    dtd[10] = ((vFrontPorch & 0xF) << 4) | (vSync & 0xF);
+    dtd[11] = (((hFrontPorch >> 8) & 0x3) << 6) |
+              (((hSync >> 8) & 0x3) << 4) |
+              (((vFrontPorch >> 4) & 0x3) << 2) |
+              ((vSync >> 4) & 0x3);
+    dtd[12] = hImageSize & 0xFF;
+    dtd[13] = vImageSize & 0xFF;
+    dtd[14] = (((hImageSize >> 8) & 0xF) << 4) | ((vImageSize >> 8) & 0xF);
+    dtd[15] = 0x00;
+    dtd[16] = 0x00;
+    dtd[17] = flags;
+}
+
 static void ParseTxEdidVics(const unsigned char *edid, int edidSize, unsigned char *txVics, int txVicsSize)
 {
     int extCount;
@@ -1002,43 +1034,31 @@ int CHDMIRxManager::PatchEdidFor120Hz(unsigned char *edidData, int edidSize)
     }
     edidData[extOffset + 127] = (256 - checksum) & 0xFF;
 
-    // ---- Step 1b: Add 2560x1440@60Hz DTD to base block ----
-    // The PS5 looks for 1440p support in the base block DTDs.
-    // Replace Monitor Name descriptor (slot 3, offset 90) with a 1440p DTD.
-    // Monitor Name is cosmetic and not needed for PS5 compatibility.
+    // ---- Step 1b: Add 2560x1440 DTDs to the base block ----
+    // Some sources only consume the first 256 bytes reliably. Keep the high
+    // refresh timings in base DTD slots as well as the CTA extension block.
     {
-        int baseSlot3 = 90;  // 18-byte descriptor slot 3
+        struct {
+            int offset;
+            unsigned int pixelClock;
+            unsigned int vBlank;
+            const char *desc;
+        } baseModes[] = {
+            { 0x36, 57104, 18, "2560x1440p144" },
+            { 0x48, 49775, 85, "2560x1440p120" },
+            { 0x5A, 24150, 41, "2560x1440p60" },
+        };
+        int i;
 
-        // 2560x1440@60Hz CVT-RBv2 timing
-        unsigned int pc = 24150;  // 241.50 MHz in 10kHz units
-        unsigned int hA = 2560, hB = 160, hF = 48, hS = 32;
-        unsigned int vA = 1440, vB = 41,  vF = 3,  vS = 5;
-        // Match stock DTD image sizes for consistency
-        unsigned int hImg = 800, vImg = 450;
-
-        edidData[baseSlot3 + 0] = pc & 0xFF;
-        edidData[baseSlot3 + 1] = (pc >> 8) & 0xFF;
-        edidData[baseSlot3 + 2] = hA & 0xFF;
-        edidData[baseSlot3 + 3] = hB & 0xFF;
-        edidData[baseSlot3 + 4] = (((hA >> 8) & 0xF) << 4) | ((hB >> 8) & 0xF);
-        edidData[baseSlot3 + 5] = vA & 0xFF;
-        edidData[baseSlot3 + 6] = vB & 0xFF;
-        edidData[baseSlot3 + 7] = (((vA >> 8) & 0xF) << 4) | ((vB >> 8) & 0xF);
-        edidData[baseSlot3 + 8] = hF & 0xFF;
-        edidData[baseSlot3 + 9] = hS & 0xFF;
-        edidData[baseSlot3 + 10] = ((vF & 0xF) << 4) | (vS & 0xF);
-        edidData[baseSlot3 + 11] = (((hF >> 8) & 0x3) << 6) |
-                                    (((hS >> 8) & 0x3) << 4) |
-                                    (((vF >> 4) & 0x3) << 2) |
-                                    ((vS >> 4) & 0x3);
-        edidData[baseSlot3 + 12] = hImg & 0xFF;
-        edidData[baseSlot3 + 13] = vImg & 0xFF;
-        edidData[baseSlot3 + 14] = (((hImg >> 8) & 0xF) << 4) | ((vImg >> 8) & 0xF);
-        edidData[baseSlot3 + 15] = 0x00; // h_border
-        edidData[baseSlot3 + 16] = 0x00; // v_border
-        edidData[baseSlot3 + 17] = 0x1E; // non-interlaced, digital separate, +H/+V
-
-        LOGD("%s: Replaced Monitor Name (base slot 3) with 2560x1440@60Hz DTD\n", __FUNCTION__);
+        for (i = 0; i < (int)(sizeof(baseModes) / sizeof(baseModes[0])); i++) {
+            WriteDetailedTiming(edidData + baseModes[i].offset,
+                                baseModes[i].pixelClock,
+                                2560, 160, 48, 32,
+                                1440, baseModes[i].vBlank, 3, 5,
+                                800, 450, 0x1E);
+            LOGD("%s: Added %s DTD to base EDID slot 0x%02x\n",
+                 __FUNCTION__, baseModes[i].desc, baseModes[i].offset);
+        }
     }
 
     // Recalculate base block checksum after slot 3 replacement
@@ -1070,8 +1090,8 @@ int CHDMIRxManager::PatchEdidFor120Hz(unsigned char *edidData, int edidSize)
         unsigned char flags; // byte 17: signal features
         const char *desc;
     } newModes[] = {
-        // 2560x1440@120Hz CVT-RBv2
-        { 48300, 2560, 160, 48, 32, 1440, 41, 3, 5, 0x1E, "2560x1440p120" },
+        // 2560x1440@120Hz timing supported by the T7 HDMI TX table
+        { 49775, 2560, 160, 48, 32, 1440, 85, 3, 5, 0x1E, "2560x1440p120" },
         // 2560x1440@60Hz CVT-RBv2
         { 24150, 2560, 160, 48, 32, 1440, 41, 3, 5, 0x1E, "2560x1440p60" },
         // 1920x1080@144Hz CVT-RBv2
