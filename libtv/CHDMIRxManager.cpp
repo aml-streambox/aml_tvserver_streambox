@@ -25,6 +25,527 @@
 #include "CTvin.h"
 #include "CTvLog.h"
 
+#ifdef STREAM_BOX
+typedef struct {
+    int width;
+    int height;
+    int fps;
+    int interlaced;
+} HdmiModeInfo;
+
+static int ParseModeName(const char *mode, HdmiModeInfo *info)
+{
+    int width = 0;
+    int height = 0;
+    int fps = 0;
+    char scan = 0;
+
+    if (mode == NULL || info == NULL) {
+        return -1;
+    }
+
+    if (sscanf(mode, "%dx%d%c%dhz", &width, &height, &scan, &fps) == 4) {
+        info->width = width;
+        info->height = height;
+        info->fps = fps;
+        info->interlaced = (scan == 'i' || scan == 'I');
+        return 0;
+    }
+
+    if (sscanf(mode, "%d%c%dhz", &height, &scan, &fps) == 3) {
+        switch (height) {
+        case 2160:
+            width = 3840;
+            break;
+        case 1080:
+            width = 1920;
+            break;
+        case 720:
+            width = 1280;
+            break;
+        case 576:
+            width = 720;
+            break;
+        case 480:
+            width = 720;
+            break;
+        default:
+            return -1;
+        }
+
+        info->width = width;
+        info->height = height;
+        info->fps = fps;
+        info->interlaced = (scan == 'i' || scan == 'I');
+        return 0;
+    }
+
+    return -1;
+}
+
+static int ReadTxDispCapModes(HdmiModeInfo *modes, int maxModes)
+{
+    FILE *fp;
+    char line[128];
+    int count = 0;
+
+    if (modes == NULL || maxModes <= 0) {
+        return 0;
+    }
+
+    fp = fopen(HDMI_TX_DISP_CAP_PATH, "r");
+    if (!fp) {
+        LOGE("%s: Failed to open %s: %s\n", __FUNCTION__, HDMI_TX_DISP_CAP_PATH, strerror(errno));
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), fp) != NULL && count < maxModes) {
+        char *p = line;
+        char *end;
+
+        while (*p == ' ' || *p == '\t') p++;
+        end = p + strlen(p);
+        while (end > p && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == '*' || end[-1] == ' ' || end[-1] == '\t')) {
+            *--end = '\0';
+        }
+
+        if (ParseModeName(p, &modes[count]) == 0) {
+            count++;
+        }
+    }
+
+    fclose(fp);
+    return count;
+}
+
+static int ModeSupportedByDispCap(const HdmiModeInfo *modes, int modeCount,
+                                  int width, int height, int fps, int interlaced)
+{
+    int i;
+
+    for (i = 0; i < modeCount; i++) {
+        if (modes[i].width == width && modes[i].height == height &&
+            modes[i].fps == fps && modes[i].interlaced == interlaced) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int VicToMode(int vic, HdmiModeInfo *mode)
+{
+    if (mode == NULL) {
+        return -1;
+    }
+
+    memset(mode, 0, sizeof(*mode));
+    switch (vic) {
+    case 1:  mode->width = 640;  mode->height = 480;  mode->fps = 60; break;
+    case 2:
+    case 3:  mode->width = 720;  mode->height = 480;  mode->fps = 60; break;
+    case 4:  mode->width = 1280; mode->height = 720;  mode->fps = 60; break;
+    case 5:  mode->width = 1920; mode->height = 1080; mode->fps = 60; mode->interlaced = 1; break;
+    case 16: mode->width = 1920; mode->height = 1080; mode->fps = 60; break;
+    case 17:
+    case 18: mode->width = 720;  mode->height = 576;  mode->fps = 50; break;
+    case 19: mode->width = 1280; mode->height = 720;  mode->fps = 50; break;
+    case 20: mode->width = 1920; mode->height = 1080; mode->fps = 50; mode->interlaced = 1; break;
+    case 31: mode->width = 1920; mode->height = 1080; mode->fps = 50; break;
+    case 32: mode->width = 1920; mode->height = 1080; mode->fps = 24; break;
+    case 33: mode->width = 1920; mode->height = 1080; mode->fps = 25; break;
+    case 34: mode->width = 1920; mode->height = 1080; mode->fps = 30; break;
+    case 63: mode->width = 1920; mode->height = 1080; mode->fps = 120; break;
+    case 64: mode->width = 1920; mode->height = 1080; mode->fps = 100; break;
+    case 93: mode->width = 3840; mode->height = 2160; mode->fps = 24; break;
+    case 94: mode->width = 3840; mode->height = 2160; mode->fps = 25; break;
+    case 95: mode->width = 3840; mode->height = 2160; mode->fps = 30; break;
+    case 96: mode->width = 3840; mode->height = 2160; mode->fps = 50; break;
+    case 97: mode->width = 3840; mode->height = 2160; mode->fps = 60; break;
+    case 98: mode->width = 4096; mode->height = 2160; mode->fps = 24; break;
+    case 99: mode->width = 4096; mode->height = 2160; mode->fps = 25; break;
+    case 100: mode->width = 4096; mode->height = 2160; mode->fps = 30; break;
+    case 101: mode->width = 4096; mode->height = 2160; mode->fps = 50; break;
+    case 102: mode->width = 4096; mode->height = 2160; mode->fps = 60; break;
+    default:
+        return -1;
+    }
+
+    return 0;
+}
+
+static int DetailedTimingToMode(const unsigned char *dtd, HdmiModeInfo *mode)
+{
+    int pixelClock;
+    int hActive, hBlank, vActive, vBlank;
+    int hTotal, vTotal;
+    int fps;
+
+    if (dtd == NULL || mode == NULL) {
+        return -1;
+    }
+
+    pixelClock = dtd[0] | (dtd[1] << 8);
+    if (pixelClock == 0) {
+        return -1;
+    }
+
+    hActive = dtd[2] | ((dtd[4] & 0xF0) << 4);
+    hBlank = dtd[3] | ((dtd[4] & 0x0F) << 8);
+    vActive = dtd[5] | ((dtd[7] & 0xF0) << 4);
+    vBlank = dtd[6] | ((dtd[7] & 0x0F) << 8);
+    hTotal = hActive + hBlank;
+    vTotal = vActive + vBlank;
+
+    if (hTotal <= 0 || vTotal <= 0) {
+        return -1;
+    }
+
+    fps = (pixelClock * 10000 + (hTotal * vTotal / 2)) / (hTotal * vTotal);
+    mode->width = hActive;
+    mode->height = vActive;
+    mode->fps = fps;
+    mode->interlaced = !!(dtd[17] & 0x80);
+    return 0;
+}
+
+static void RecalculateEdidBlockChecksum(unsigned char *block)
+{
+    unsigned char checksum = 0;
+    int i;
+
+    for (i = 0; i < 127; i++) {
+        checksum += block[i];
+    }
+    block[127] = (unsigned char)((256 - checksum) & 0xFF);
+}
+
+static void ParseTxEdidVics(const unsigned char *edid, int edidSize, unsigned char *txVics, int txVicsSize)
+{
+    int extCount;
+    int ext;
+
+    if (edid == NULL || txVics == NULL || txVicsSize < 256 || edidSize < 128) {
+        return;
+    }
+
+    extCount = edid[0x7E];
+    for (ext = 0; ext < extCount; ext++) {
+        int extOffset = 128 + ext * 128;
+        int dtdStart;
+        int dataEnd;
+        int offset;
+
+        if (extOffset + 128 > edidSize || edid[extOffset] != 0x02) {
+            continue;
+        }
+
+        dtdStart = edid[extOffset + 2];
+        dataEnd = dtdStart ? dtdStart : 127;
+        if (dataEnd < 4 || dataEnd > 127) {
+            dataEnd = 127;
+        }
+
+        offset = extOffset + 4;
+        while (offset < extOffset + dataEnd) {
+            int tag = edid[offset] >> 5;
+            int len = edid[offset] & 0x1F;
+            int i;
+
+            if (len == 0 || offset + len >= extOffset + 127) {
+                break;
+            }
+
+            if (tag == 2) {
+                for (i = 1; i <= len; i++) {
+                    txVics[edid[offset + i] & 0x7F] = 1;
+                }
+            }
+            offset += len + 1;
+        }
+    }
+}
+
+static int TxSupportsVic(int vic, const unsigned char *txVics,
+                         const HdmiModeInfo *txModes, int txModeCount)
+{
+    HdmiModeInfo mode;
+
+    if (vic > 0 && vic < 256 && txVics[vic]) {
+        return 1;
+    }
+
+    if (VicToMode(vic, &mode) == 0) {
+        return ModeSupportedByDispCap(txModes, txModeCount,
+                                      mode.width, mode.height, mode.fps, mode.interlaced);
+    }
+
+    return 0;
+}
+
+static void FilterCeaVideoDataBlocks(unsigned char *extBlock, const unsigned char *txVics,
+                                     const HdmiModeInfo *txModes, int txModeCount, int *removedCount)
+{
+    int dtdStart;
+    int dataEnd;
+    int offset;
+
+    if (extBlock == NULL || extBlock[0] != 0x02) {
+        return;
+    }
+
+    dtdStart = extBlock[2];
+    dataEnd = dtdStart ? dtdStart : 127;
+    if (dataEnd < 4 || dataEnd > 127) {
+        dataEnd = 127;
+    }
+
+    offset = 4;
+    while (offset < dataEnd) {
+        int tag = extBlock[offset] >> 5;
+        int len = extBlock[offset] & 0x1F;
+
+        if (len == 0 || offset + len >= 127) {
+            break;
+        }
+
+        if (tag == 2 || (tag == 7 && len >= 2 && extBlock[offset + 1] == 0x0e)) {
+            int src;
+            int payloadStart = (tag == 2) ? (offset + 1) : (offset + 2);
+            int dst = payloadStart;
+            int newLen;
+            int removeBytes;
+
+            for (src = payloadStart; src <= offset + len; src++) {
+                int vic = extBlock[src] & 0x7F;
+                if (TxSupportsVic(vic, txVics, txModes, txModeCount)) {
+                    extBlock[dst++] = extBlock[src];
+                } else {
+                    LOGD("%s: filtering RX EDID VIC %d not supported by HDMI TX\n", __FUNCTION__, vic);
+                    if (removedCount) (*removedCount)++;
+                }
+            }
+
+            newLen = dst - (offset + 1);
+            if (newLen == len) {
+                offset += len + 1;
+                continue;
+            }
+
+            if ((tag == 2 && newLen == 0) || (tag == 7 && newLen <= 1)) {
+                removeBytes = len + 1;
+                memmove(extBlock + offset, extBlock + offset + removeBytes, 127 - (offset + removeBytes));
+                memset(extBlock + 127 - removeBytes, 0, removeBytes);
+                if (dtdStart) {
+                    extBlock[2] -= removeBytes;
+                    dtdStart -= removeBytes;
+                    dataEnd -= removeBytes;
+                }
+                continue;
+            }
+
+            removeBytes = len - newLen;
+            extBlock[offset] = (unsigned char)((tag << 5) | newLen);
+            memmove(extBlock + offset + 1 + newLen,
+                    extBlock + offset + 1 + len,
+                    127 - (offset + 1 + len));
+            memset(extBlock + 127 - removeBytes, 0, removeBytes);
+            if (dtdStart) {
+                extBlock[2] -= removeBytes;
+                dtdStart -= removeBytes;
+                dataEnd -= removeBytes;
+            }
+            offset += newLen + 1;
+        } else {
+            offset += len + 1;
+        }
+    }
+}
+
+static void RemoveCeaDataBlocksByOui(unsigned char *extBlock, int oui0, int oui1, int oui2, int *removedCount)
+{
+    int dtdStart;
+    int dataEnd;
+    int offset;
+
+    if (extBlock == NULL || extBlock[0] != 0x02) {
+        return;
+    }
+
+    dtdStart = extBlock[2];
+    dataEnd = dtdStart ? dtdStart : 127;
+    if (dataEnd < 4 || dataEnd > 127) {
+        dataEnd = 127;
+    }
+
+    offset = 4;
+    while (offset < dataEnd) {
+        int tag = extBlock[offset] >> 5;
+        int len = extBlock[offset] & 0x1F;
+
+        if (len == 0 || offset + len >= 127) {
+            break;
+        }
+
+        if (tag == 3 && len >= 3 &&
+            extBlock[offset + 1] == oui0 && extBlock[offset + 2] == oui1 && extBlock[offset + 3] == oui2) {
+            int removeBytes = len + 1;
+            LOGD("%s: removing RX EDID vendor block OUI %02x-%02x-%02x not supported by HDMI TX\n",
+                 __FUNCTION__, oui0, oui1, oui2);
+            memmove(extBlock + offset, extBlock + offset + removeBytes, 127 - (offset + removeBytes));
+            memset(extBlock + 127 - removeBytes, 0, removeBytes);
+            if (dtdStart) {
+                extBlock[2] -= removeBytes;
+                dtdStart -= removeBytes;
+                dataEnd -= removeBytes;
+            }
+            if (removedCount) (*removedCount)++;
+            continue;
+        }
+
+        offset += len + 1;
+    }
+}
+
+static void FilterDetailedTimings(unsigned char *block, int start, int end,
+                                  const HdmiModeInfo *txModes, int txModeCount, int *removedCount)
+{
+    int offset;
+
+    for (offset = start; offset + 18 <= end; offset += 18) {
+        HdmiModeInfo mode;
+
+        if (DetailedTimingToMode(block + offset, &mode) != 0) {
+            continue;
+        }
+
+        if (!ModeSupportedByDispCap(txModes, txModeCount,
+                                    mode.width, mode.height, mode.fps, mode.interlaced)) {
+            LOGD("%s: filtering RX EDID DTD %dx%d%s%d not supported by HDMI TX\n",
+                 __FUNCTION__, mode.width, mode.height, mode.interlaced ? "i" : "p", mode.fps);
+            memset(block + offset, 0, 18);
+            if (removedCount) (*removedCount)++;
+        }
+    }
+}
+
+static void FilterHfScdbCapabilities(unsigned char *payload, int count, int allmSupported, int vrrSupported)
+{
+    if (payload == NULL) {
+        return;
+    }
+
+    if (count >= 8 && !allmSupported) {
+        payload[7] &= (unsigned char)~(1 << 1);
+    }
+
+    if (count >= 10 && !vrrSupported) {
+        payload[7] &= (unsigned char)~((1 << 3) | (1 << 5) | (1 << 6));
+        payload[8] = 0;
+        payload[9] = 0;
+    }
+}
+
+static void FilterCeaHfScdb(unsigned char *extBlock, int allmSupported, int vrrSupported)
+{
+    int dtdStart;
+    int dataEnd;
+    int offset;
+
+    if (extBlock == NULL || extBlock[0] != 0x02) {
+        return;
+    }
+
+    dtdStart = extBlock[2];
+    dataEnd = dtdStart ? dtdStart : 127;
+    if (dataEnd < 4 || dataEnd > 127) {
+        dataEnd = 127;
+    }
+
+    offset = 4;
+    while (offset < dataEnd) {
+        int tag = extBlock[offset] >> 5;
+        int len = extBlock[offset] & 0x1F;
+
+        if (len == 0 || offset + len >= 127) {
+            break;
+        }
+
+        if (tag == 3 && len >= 3 &&
+            extBlock[offset + 1] == 0xd8 && extBlock[offset + 2] == 0x5d && extBlock[offset + 3] == 0xc4) {
+            FilterHfScdbCapabilities(extBlock + offset + 1, len, allmSupported, vrrSupported);
+        } else if (tag == 7 && len >= 1 && extBlock[offset + 1] == 0x79) {
+            FilterHfScdbCapabilities(extBlock + offset + 1, len, allmSupported, vrrSupported);
+        }
+
+        offset += len + 1;
+    }
+}
+
+static int ParseTxFeatureSupport(const unsigned char *edid, int edidSize, int feature)
+{
+    int extCount;
+    int ext;
+
+    if (edid == NULL || edidSize < 128) {
+        return 0;
+    }
+
+    extCount = edid[0x7E];
+    for (ext = 0; ext < extCount; ext++) {
+        int extOffset = 128 + ext * 128;
+        int dtdStart;
+        int dataEnd;
+        int offset;
+
+        if (extOffset + 128 > edidSize || edid[extOffset] != 0x02) {
+            continue;
+        }
+
+        dtdStart = edid[extOffset + 2];
+        dataEnd = dtdStart ? dtdStart : 127;
+        if (dataEnd < 4 || dataEnd > 127) {
+            dataEnd = 127;
+        }
+
+        offset = extOffset + 4;
+        while (offset < extOffset + dataEnd) {
+            int tag = edid[offset] >> 5;
+            int len = edid[offset] & 0x1F;
+            unsigned char *payload = NULL;
+
+            if (len == 0 || offset + len >= extOffset + 127) {
+                break;
+            }
+
+            if (tag == 3 && len >= 3 &&
+                edid[offset + 1] == 0xd8 && edid[offset + 2] == 0x5d && edid[offset + 3] == 0xc4) {
+                payload = (unsigned char *)(edid + offset + 1);
+            } else if (tag == 7 && len >= 1 && edid[offset + 1] == 0x79) {
+                payload = (unsigned char *)(edid + offset + 1);
+            }
+
+            if (payload != NULL) {
+                if (feature == 0 && len >= 8 && (payload[7] & (1 << 1))) {
+                    return 1;
+                }
+                if (feature == 1 && len >= 10) {
+                    int vrrMin = payload[8] & 0x3F;
+                    int vrrMax = (((payload[8] & 0xC0) >> 6) << 8) | payload[9];
+                    if (vrrMin > 0 && vrrMax > 0) {
+                        return 1;
+                    }
+                }
+            }
+
+            offset += len + 1;
+        }
+    }
+
+    return 0;
+}
+#endif
+
 CHDMIRxManager::CHDMIRxManager()
 {
 #ifdef STREAM_BOX_TRACE
@@ -672,6 +1193,96 @@ int CHDMIRxManager::ReadEdidFromHdmiTx(unsigned char *edidData, int maxSize)
     }
 
     LOGD("%s: Successfully read EDID from HDMI TX\n", __FUNCTION__);
+    return 0;
+}
+
+int CHDMIRxManager::GetTxAllmSupported(void)
+{
+    unsigned char txEdid[REAL_EDID_DATA_SIZE] = {0};
+
+    if (ReadEdidFromHdmiTx(txEdid, REAL_EDID_DATA_SIZE) < 0) {
+        return 0;
+    }
+
+    return ParseTxFeatureSupport(txEdid, REAL_EDID_DATA_SIZE, 0);
+}
+
+int CHDMIRxManager::GetTxVrrSupported(void)
+{
+    unsigned char txEdid[REAL_EDID_DATA_SIZE] = {0};
+
+    if (ReadEdidFromHdmiTx(txEdid, REAL_EDID_DATA_SIZE) < 0) {
+        return 0;
+    }
+
+    return ParseTxFeatureSupport(txEdid, REAL_EDID_DATA_SIZE, 1);
+}
+
+int CHDMIRxManager::FilterEdidByTxCapabilities(unsigned char *edidData, int edidSize)
+{
+    unsigned char txEdid[REAL_EDID_DATA_SIZE] = {0};
+    unsigned char txVics[256] = {0};
+    HdmiModeInfo txModes[128];
+    int txModeCount;
+    int extCount;
+    int ext;
+    int removedCount = 0;
+    int allmSupported;
+    int vrrSupported;
+
+    if (edidData == NULL || edidSize < 128) {
+        LOGE("%s: Invalid EDID data or size\n", __FUNCTION__);
+        return -1;
+    }
+
+    if (ReadEdidFromHdmiTx(txEdid, REAL_EDID_DATA_SIZE) < 0) {
+        LOGD("%s: No HDMI TX EDID available, skipping TX capability filter\n", __FUNCTION__);
+        return 0;
+    }
+
+    memset(txModes, 0, sizeof(txModes));
+    txModeCount = ReadTxDispCapModes(txModes, sizeof(txModes) / sizeof(txModes[0]));
+    if (txModeCount <= 0) {
+        LOGD("%s: No HDMI TX disp_cap modes available, skipping TX capability filter\n", __FUNCTION__);
+        return 0;
+    }
+
+    ParseTxEdidVics(txEdid, REAL_EDID_DATA_SIZE, txVics, sizeof(txVics));
+    allmSupported = ParseTxFeatureSupport(txEdid, REAL_EDID_DATA_SIZE, 0);
+    vrrSupported = ParseTxFeatureSupport(txEdid, REAL_EDID_DATA_SIZE, 1);
+
+    FilterDetailedTimings(edidData, 0x36, 0x7E, txModes, txModeCount, &removedCount);
+    RecalculateEdidBlockChecksum(edidData);
+
+    extCount = edidData[0x7E];
+    for (ext = 0; ext < extCount; ext++) {
+        int extOffset = 128 + ext * 128;
+        int dtdStart;
+
+        if (extOffset + 128 > edidSize) {
+            break;
+        }
+
+        if (edidData[extOffset] != 0x02) {
+            RecalculateEdidBlockChecksum(edidData + extOffset);
+            continue;
+        }
+
+        FilterCeaVideoDataBlocks(edidData + extOffset, txVics, txModes, txModeCount, &removedCount);
+        FilterCeaHfScdb(edidData + extOffset, allmSupported, vrrSupported);
+        if (!vrrSupported) {
+            RemoveCeaDataBlocksByOui(edidData + extOffset, 0x1a, 0x00, 0x00, &removedCount);
+        }
+
+        dtdStart = edidData[extOffset + 2];
+        if (dtdStart >= 4 && dtdStart < 127) {
+            FilterDetailedTimings(edidData + extOffset, dtdStart, 127, txModes, txModeCount, &removedCount);
+        }
+        RecalculateEdidBlockChecksum(edidData + extOffset);
+    }
+
+    LOGD("%s: HDMI TX capability filter complete: removed=%d, allm=%d, vrr=%d\n",
+         __FUNCTION__, removedCount, allmSupported, vrrSupported);
     return 0;
 }
 

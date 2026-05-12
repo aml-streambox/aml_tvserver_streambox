@@ -26,6 +26,7 @@
 #define HDMI_VRR_ENABLED                  "/sys/class/hdmirx/hdmirx0/vrr_func_ctrl"
 #ifdef STREAM_BOX
 #define HDMI_TX_RAWEDID_PATH              "/sys/class/amhdmitx/amhdmitx0/rawedid"
+#define HDMI_TX_DISP_CAP_PATH             "/sys/class/amhdmitx/amhdmitx0/disp_cap"
 #endif
 
 #define REAL_EDID_DATA_SIZE        (256)
@@ -85,6 +86,9 @@ public:
     int PatchEdidFor120Hz(unsigned char *edidData, int edidSize);
     int PatchEdidMonitorName(unsigned char *edidData, int edidSize);
     int ReadEdidFromHdmiTx(unsigned char *edidData, int maxSize);
+    int FilterEdidByTxCapabilities(unsigned char *edidData, int edidSize);
+    int GetTxAllmSupported(void);
+    int GetTxVrrSupported(void);
     int PassthroughEdidFromTxToRx(int port);
 #endif
 private:

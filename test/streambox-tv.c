@@ -2182,6 +2182,155 @@ static int FormatHdmitxMode(int width, int height, int fps, char *mode_str, size
     return 0;
 }
 
+typedef struct {
+    int width;
+    int height;
+    int fps;
+    int interlaced;
+    char name[64];
+} hdmitx_mode_info_t;
+
+static int ParseHdmitxModeName(const char *mode, hdmitx_mode_info_t *info)
+{
+    int width = 0;
+    int height = 0;
+    int fps = 0;
+    char scan = 0;
+
+    if (mode == NULL || info == NULL) {
+        return -1;
+    }
+
+    if (sscanf(mode, "%dx%d%c%dhz", &width, &height, &scan, &fps) == 4) {
+        info->width = width;
+        info->height = height;
+        info->fps = fps;
+        info->interlaced = (scan == 'i' || scan == 'I');
+        snprintf(info->name, sizeof(info->name), "%s", mode);
+        return 0;
+    }
+
+    if (sscanf(mode, "%d%c%dhz", &height, &scan, &fps) == 3) {
+        switch (height) {
+        case 2160: width = 3840; break;
+        case 1080: width = 1920; break;
+        case 720:  width = 1280; break;
+        case 576:  width = 720;  break;
+        case 480:  width = 720;  break;
+        default:
+            return -1;
+        }
+
+        info->width = width;
+        info->height = height;
+        info->fps = fps;
+        info->interlaced = (scan == 'i' || scan == 'I');
+        snprintf(info->name, sizeof(info->name), "%s", mode);
+        return 0;
+    }
+
+    return -1;
+}
+
+static int ReadHdmitxDispCapModes(hdmitx_mode_info_t *modes, int max_modes)
+{
+    FILE *fp;
+    char line[128];
+    int count = 0;
+
+    if (modes == NULL || max_modes <= 0) {
+        return 0;
+    }
+
+    fp = fopen("/sys/class/amhdmitx/amhdmitx0/disp_cap", "r");
+    if (!fp) {
+        LOGD("%s: failed to open HDMI TX disp_cap: %s\n", __FUNCTION__, strerror(errno));
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), fp) != NULL && count < max_modes) {
+        char *p = line;
+        char *end;
+
+        while (*p == ' ' || *p == '\t') p++;
+        end = p + strlen(p);
+        while (end > p && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == '*' || end[-1] == ' ' || end[-1] == '\t')) {
+            *--end = '\0';
+        }
+
+        if (ParseHdmitxModeName(p, &modes[count]) == 0) {
+            count++;
+        }
+    }
+
+    fclose(fp);
+    return count;
+}
+
+static int SelectSupportedHdmitxMode(int rx_width, int rx_height, int rx_fps,
+                                     char *mode_str, size_t mode_str_size)
+{
+    hdmitx_mode_info_t modes[128];
+    int mode_count;
+    int i;
+    int best = -1;
+    long best_score = -1;
+
+    if (mode_str == NULL || mode_str_size == 0) {
+        return -1;
+    }
+
+    mode_count = ReadHdmitxDispCapModes(modes, sizeof(modes) / sizeof(modes[0]));
+    if (mode_count <= 0) {
+        LOGD("%s: no HDMI TX capability list, keeping requested mode %s\n", __FUNCTION__, mode_str);
+        return 0;
+    }
+
+    for (i = 0; i < mode_count; i++) {
+        if (!modes[i].interlaced && modes[i].width == rx_width &&
+            modes[i].height == rx_height && modes[i].fps == rx_fps) {
+            snprintf(mode_str, mode_str_size, "%s", modes[i].name);
+            return 0;
+        }
+    }
+
+    for (i = 0; i < mode_count; i++) {
+        long pixels;
+        long score;
+
+        if (modes[i].interlaced) {
+            continue;
+        }
+
+        pixels = (long)modes[i].width * (long)modes[i].height;
+        score = pixels;
+
+        if (modes[i].width <= rx_width && modes[i].height <= rx_height) {
+            score += 1000000000L;
+        }
+        if (modes[i].fps == rx_fps) {
+            score += 2000000000L;
+        } else if (modes[i].fps < rx_fps) {
+            score += 500000000L;
+        }
+
+        if (score > best_score) {
+            best_score = score;
+            best = i;
+        }
+    }
+
+    if (best < 0) {
+        LOGD("%s: no non-interlaced HDMI TX fallback, keeping requested mode %s\n", __FUNCTION__, mode_str);
+        return 0;
+    }
+
+    LOGD("%s: requested TX mode %dx%dp%d is unsupported, using sink mode %s\n",
+         __FUNCTION__, rx_width, rx_height, rx_fps, modes[best].name);
+    snprintf(mode_str, mode_str_size, "%s", modes[best].name);
+    return 0;
+}
+
 /* --- HDMI TX/RX Synchronization --- */
 
 
@@ -2323,6 +2472,7 @@ static void SynchronizeHdmitxToHdmirx(struct TvClientWrapper_t *pTvClientWrapper
     if (ret != 0) {
         return;
     }
+    SelectSupportedHdmitxMode(rx_width, rx_height, rounded_fps, mode_str, sizeof(mode_str));
 
     float actual_input_rate_hz = 0.0f;
     int frac_rate_policy = 0;

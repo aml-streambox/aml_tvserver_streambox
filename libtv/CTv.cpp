@@ -672,6 +672,7 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
         LOGD("%s:File:%s\n", __FUNCTION__, edidFileName);
         // Patch monitor name on 1.4 EDID too
         mpHDMIRxManager->PatchEdidMonitorName(edid14, REAL_EDID_DATA_SIZE);
+        mpHDMIRxManager->FilterEdidByTxCapabilities(edid14, REAL_EDID_DATA_SIZE);
 
         // Load EDID 2.0 into a larger buffer for patching
         unsigned char edid20[PATCHED_EDID_MAX_SIZE];
@@ -690,6 +691,7 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
         mpHDMIRxManager->PatchEdidFor120Hz(edid20, PATCHED_EDID_MAX_SIZE);
         // Patch monitor name
         mpHDMIRxManager->PatchEdidMonitorName(edid20, PATCHED_EDID_MAX_SIZE);
+        mpHDMIRxManager->FilterEdidByTxCapabilities(edid20, PATCHED_EDID_MAX_SIZE);
 
         // Build the combined buffer for EDID_TYPE_256_PLUS_512:
         // kernel expects: [1.4 EDID (256 bytes)] [2.0 EDID (variable, up to 512 bytes)]
@@ -756,12 +758,20 @@ int CTv::LoadEdidData(int isNeedBlackScreen, int isDolbyVisionEnable)
             value = atoi(buf);
             allmEnable = (value & 1);
             VrrEnable = ((value >> 1) & 1);
+#ifdef STREAM_BOX
+            allmEnable = allmEnable && mpHDMIRxManager->GetTxAllmSupported();
+            VrrEnable = VrrEnable && mpHDMIRxManager->GetTxVrrSupported();
+#endif
             LOGD("%s init HDMI feature status allmEnable:%d, VrrEnable:%d.\n",
                 __FUNCTION__, allmEnable, VrrEnable);
             mpHDMIRxManager->SetHDMIFeatureInit(allmEnable, VrrEnable);
         } else {
             allmEnable = mpHDMIRxManager->GetAllmEnabled();
             VrrEnable = mpHDMIRxManager->GetVrrEnabled();
+#ifdef STREAM_BOX
+            allmEnable = allmEnable && mpHDMIRxManager->GetTxAllmSupported();
+            VrrEnable = VrrEnable && mpHDMIRxManager->GetTxVrrSupported();
+#endif
             value = ((VrrEnable << 1)|allmEnable);
             LOGD("%s HDMI feature uenv unexist, save it allmEnable:%d, VrrEnable:%d.\n",
                 __FUNCTION__ , allmEnable, VrrEnable);
@@ -1230,6 +1240,12 @@ bool CTv::GetDolbyVisionSupportStatus(void) {
 
 int CTv::SetHdmiAllmEnabled(int enable)
 {
+#ifdef STREAM_BOX
+    if (enable && !mpHDMIRxManager->GetTxAllmSupported()) {
+        LOGD("%s: HDMI TX does not support ALLM, forcing disabled\n", __FUNCTION__);
+        enable = 0;
+    }
+#endif
     LOGD("%s: [%s]\n", __FUNCTION__, enable == 1?"enable":"disable");
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: ENTRY, enable=%d\n", __FUNCTION__, enable);
@@ -1272,6 +1288,12 @@ int CTv::GetHdmiAllmEnabled()
 
 int CTv::SetHdmiVrrEnabled(int enable)
 {
+#ifdef STREAM_BOX
+    if (enable && !mpHDMIRxManager->GetTxVrrSupported()) {
+        LOGD("%s: HDMI TX does not support VRR, forcing disabled\n", __FUNCTION__);
+        enable = 0;
+    }
+#endif
     LOGD("%s: [%s]\n", __FUNCTION__, enable == 1?"enable":"disable");
 #ifdef STREAM_BOX_TRACE
     printf("[TRACE] %s: ENTRY, enable=%d\n", __FUNCTION__, enable);
@@ -1281,7 +1303,7 @@ int CTv::SetHdmiVrrEnabled(int enable)
     int saveValue = 0;
     if (buf) {
         saveValue = atoi(buf);
-        if ((saveValue >> 1) == enable) {
+        if (((saveValue >> 1) & 0x1) == enable) {
             LOGD("%s: same status return!\n", __FUNCTION__);
 #ifdef STREAM_BOX_TRACE
             printf("[TRACE] %s: Same status, returning early\n", __FUNCTION__);
@@ -1465,4 +1487,3 @@ void CTv::CTvMsgQueue::handleMessage ( CMessage &msg )
         break;
     }
 }
-
